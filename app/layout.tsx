@@ -3,6 +3,9 @@ import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { Anton, Inter } from "next/font/google";
 import { BottomDock } from "@/components/bottom-dock";
+import { PwaManager } from "@/components/pwa";
+import { THEME_COLOR } from "@/lib/theme";
+import { str } from "@/lib/strings";
 import "./globals.css";
 
 const inter = Inter({
@@ -19,35 +22,31 @@ const anton = Anton({
 });
 
 export const metadata: Metadata = {
-  title: "repiq",
-  description: "Minimalist workout tracker",
-  manifest: "/manifest.json",
+  title: str.app.name,
+  description: str.app.description,
+  applicationName: "Repiq",
+  // The favicon comes from app/icon.svg and the manifest from app/manifest.ts.
   icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
     apple: "/apple-touch-icon.png",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "repiq",
+    title: str.app.name,
   },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#baa3d0",
+  themeColor: THEME_COLOR,
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom stays enabled for accessibility; inputs use 16px text so iOS
+  // doesn't auto-zoom when they're focused.
   interactiveWidget: "resizes-content",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
@@ -58,6 +57,7 @@ export default function RootLayout({
         <Suspense fallback={null}>
           <BottomDock />
         </Suspense>
+        <PwaManager />
       </body>
     </html>
   );
