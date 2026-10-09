@@ -7,6 +7,32 @@ self.addEventListener("install", () => {
     event.waitUntil(self.clients.claim());
   });
   
+  // 1. Receive background push from server (wakes phone!)
+  self.addEventListener("push", (event) => {
+    let data = {};
+    if (event.data) {
+      try {
+        data = event.data.json();
+      } catch {
+        data = { title: "Rest Over!", body: event.data.text() };
+      }
+    }
+  
+    const title = data.title || "Rest Complete!";
+    const options = {
+      body: data.body || "Time for your next set.",
+      icon: "/icon.png",
+      badge: "/icon.png",
+      vibrate: [200, 100, 200],
+      tag: "repiq-rest-timer",
+      renotify: true,
+      data: { url: data.url || "/" },
+    };
+  
+    event.waitUntil(self.registration.showNotification(title, options));
+  });
+  
+  // 2. Open app when notification clicked
   self.addEventListener("notificationclick", (event) => {
     event.notification.close();
     const urlToOpen = event.notification.data?.url || "/";
@@ -25,55 +51,4 @@ self.addEventListener("install", () => {
           }
         })
     );
-  });
-  
-  let currentTimerTimeout = null;
-  
-  self.addEventListener("message", (event) => {
-    if (event.data?.type === "TRIGGER_NOTIFICATION") {
-      const { title, body, tag, url } = event.data;
-      event.waitUntil(
-        self.registration.showNotification(title, {
-          body,
-          tag: tag || "repiq-notification",
-          icon: "/icon.png",
-          badge: "/icon.png",
-          data: { url: url || "/" },
-        })
-      );
-    }
-  
-    // Cancel any running countdown if the user unchecks the set or finishes early
-    if (event.data?.type === "CANCEL_REST_TIMER") {
-      if (currentTimerTimeout) {
-        clearTimeout(currentTimerTimeout);
-        currentTimerTimeout = null;
-      }
-    }
-  
-    // Schedule timer directly in the service worker
-    if (event.data?.type === "SCHEDULE_REST_TIMER") {
-      const { restSeconds, workoutId } = event.data;
-  
-      if (currentTimerTimeout) {
-        clearTimeout(currentTimerTimeout);
-      }
-  
-      const timerPromise = new Promise((resolve) => {
-        currentTimerTimeout = setTimeout(async () => {
-          await self.registration.showNotification("Rest complete!", {
-            body: "Time for your next set. Tap to resume workout.",
-            tag: "repiq-rest-timer",
-            icon: "/icon.png",
-            badge: "/icon.png",
-            vibrate: [200, 100, 200],
-            data: { url: `/workout/${workoutId}` },
-          });
-          currentTimerTimeout = null;
-          resolve();
-        }, restSeconds * 1000);
-      });
-  
-      event.waitUntil(timerPromise);
-    }
   });

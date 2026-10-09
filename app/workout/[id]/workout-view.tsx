@@ -22,6 +22,55 @@ import {
 } from "@/components/ui";
 import { WorkoutDetail, WorkoutLog } from "./page";
 import { completeWorkout, discardWorkout, updateLogSet } from "./actions";
+import { saveSubscription, scheduleServerRestPush } from "@/app/actions/push";
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function subscribeToPush() {
+  if (
+    typeof window === "undefined" ||
+    !("serviceWorker" in navigator) ||
+    !("PushManager" in window)
+  ) {
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+
+    if (!sub) {
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) return;
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
+
+    const subJson = sub.toJSON();
+    if (subJson.endpoint && subJson.keys?.p256dh && subJson.keys?.auth) {
+      await saveSubscription({
+        endpoint: subJson.endpoint,
+        keys: {
+          p256dh: subJson.keys.p256dh,
+          auth: subJson.keys.auth,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("Push subscription fout:", err);
+  }
+}
 
 export function WorkoutView({
   workout,
@@ -55,52 +104,21 @@ export function WorkoutView({
 
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Absolute end timestamp in ms for on-screen UI
+  // Doel-eindtijdstip in milliseconden voor scherm-UI
   const [targetEndTimestamp, setTargetEndTimestamp] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
-  // Silent audio keep-alive
-  const keepAliveAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  const startKeepAlive = () => {
-    try {
-      if (!keepAliveAudioRef.current) {
-        keepAliveAudioRef.current = new Audio(
-          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA=="
-        );
-        keepAliveAudioRef.current.loop = true;
-      }
-      keepAliveAudioRef.current.play().catch(() => {});
-    } catch {}
-  };
-
-  const stopKeepAlive = () => {
-    try {
-      if (keepAliveAudioRef.current) {
-        keepAliveAudioRef.current.pause();
-        keepAliveAudioRef.current.currentTime = 0;
-      }
-    } catch {}
-  };
-
+  // Registreer Service Worker bij mount
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker.register("/sw.js").catch(console.error);
     }
-
-    return () => {
-      stopKeepAlive();
-      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: "CANCEL_REST_TIMER" });
-      }
-    };
   }, []);
 
-  // UI display counter (runs while screen is on)
+  // UI countdown timer
   useEffect(() => {
     if (!targetEndTimestamp) {
       setRemainingSeconds(null);
-      stopKeepAlive();
       return;
     }
 
@@ -111,7 +129,6 @@ export function WorkoutView({
 
       if (diff <= 0) {
         setTargetEndTimestamp(null);
-        stopKeepAlive();
       }
     };
 
@@ -157,40 +174,25 @@ export function WorkoutView({
     );
 
     if (nextVal) {
-      if (allowRestNotification && typeof window !== "undefined" && "Notification" in window) {
-        if (Notification.permission === "default") {
-          await Notification.requestPermission();
-        }
-      }
-
       const duration = restSeconds || 90;
       setTargetEndTimestamp(Date.now() + duration * 1000);
-      startKeepAlive();
 
-      // Hand off the timer to the Service Worker so it fires in background/lock screen
       if (
         allowRestNotification &&
         typeof window !== "undefined" &&
-        "serviceWorker" in navigator
+        "Notification" in window
       ) {
-        navigator.serviceWorker.ready.then((reg) => {
-          reg.active?.postMessage({
-            type: "SCHEDULE_REST_TIMER",
-            restSeconds: duration,
-            workoutId: workout.id,
-          });
-        });
+        if (Notification.permission === "default") {
+          await Notification.requestPermission();
+        }
+
+        if (Notification.permission === "granted") {
+          await subscribeToPush();
+          scheduleServerRestPush(duration, workout.id);
+        }
       }
     } else {
-      // Unchecked: stop the countdown and tell the service worker to cancel
       setTargetEndTimestamp(null);
-      stopKeepAlive();
-
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        navigator.serviceWorker.ready.then((reg) => {
-          reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
-        });
-      }
     }
 
     startTransition(async () => {
@@ -217,13 +219,6 @@ export function WorkoutView({
   };
 
   const handleFinish = () => {
-    stopKeepAlive();
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.ready.then((reg) => {
-        reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
-      });
-    }
-
     startTransition(async () => {
       await completeWorkout(workout.id);
       window.location.href = "/";
@@ -231,18 +226,11 @@ export function WorkoutView({
   };
 
   const handleDiscard = () => {
-    if (confirm("Discard this workout session?")) {
-      stopKeepAlive();
+    if (confirm("Workout sessie verwijderen?")) {
       setTargetEndTimestamp(null);
       setRemainingSeconds(null);
       setLogs([]);
       setCurrentStep(0);
-
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        navigator.serviceWorker.ready.then((reg) => {
-          reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
-        });
-      }
 
       startTransition(async () => {
         await discardWorkout(workout.id);
@@ -262,15 +250,17 @@ export function WorkoutView({
           <CloseButton onClick={handleDiscard} label="Close" />
         </Header>
 
-        {/* Top Hero Rest Timer */}
+        {/* Bovenste Hero Rust Timer */}
         {remainingSeconds !== null && (
           <div className={`${card} text-left`}>
             <p className={label}>Rest</p>
-            <p className={`${metric} tracking-tight`}>{formatTimer(remainingSeconds)}</p>
+            <p className={`${metric} tracking-tight`}>
+              {formatTimer(remainingSeconds)}
+            </p>
           </div>
         )}
 
-        {/* Active Exercise Card */}
+        {/* Actieve Oefening Card */}
         <Section
           label={<span className={display}>{currentExercise.name}</span>}
           meta={
@@ -279,7 +269,7 @@ export function WorkoutView({
               : `${currentStep + 1}/${exercises.length}`
           }
         >
-          {/* Column Headers */}
+          {/* Kolomtitels */}
           <div className="grid grid-cols-12 gap-2 text-center items-center px-2 pt-1">
             <span className={`${label} col-span-2 text-left`}>Set</span>
             <span className={`${label} col-span-4`}>Kg</span>
@@ -287,7 +277,7 @@ export function WorkoutView({
             <span className={`${label} col-span-2 text-right`}>Done</span>
           </div>
 
-          {/* Sets for Current Exercise */}
+          {/* Sets voor Huidige Oefening */}
           <div className={s.tight}>
             {currentExercise.sets.map((set) => {
               const weightPlaceholder =
@@ -303,9 +293,13 @@ export function WorkoutView({
               return (
                 <div
                   key={set.id}
-                  className={`${set.completed ? rowDone : row} p-2.5 grid grid-cols-12 gap-2 items-center transition`}
+                  className={`${
+                    set.completed ? rowDone : row
+                  } p-2.5 grid grid-cols-12 gap-2 items-center transition`}
                 >
-                  <span className={`col-span-2 ${t.body} font-semibold text-[#71717a] pl-2`}>
+                  <span
+                    className={`col-span-2 ${t.body} font-semibold text-[#71717a] pl-2`}
+                  >
                     {set.set_number}
                   </span>
 
@@ -360,14 +354,14 @@ export function WorkoutView({
           </div>
         </Section>
 
-        {/* Navigation / Finish Controls */}
-        <div className={`pt-2 ${!isFirstExercise ? "grid grid-cols-2 gap-2" : ""}`}>
+        {/* Knoppen Navigatie / Afronden */}
+        <div
+          className={`pt-2 ${
+            !isFirstExercise ? "grid grid-cols-2 gap-2" : ""
+          }`}
+        >
           {!isFirstExercise && (
-            <Action
-              variant="secondary"
-              type="button"
-              onClick={handleBack}
-            >
+            <Action variant="secondary" type="button" onClick={handleBack}>
               Back
             </Action>
           )}
@@ -382,11 +376,7 @@ export function WorkoutView({
               {isPending ? "Saving..." : "Finish Workout"}
             </Action>
           ) : (
-            <Action
-              variant="secondary"
-              type="button"
-              onClick={handleNext}
-            >
+            <Action variant="secondary" type="button" onClick={handleNext}>
               Next
             </Action>
           )}
