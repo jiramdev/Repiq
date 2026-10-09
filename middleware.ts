@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 1. Allow static assets, images, icons, and API routes through
+  // Allow static assets, images, icons, and API routes through
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
@@ -14,15 +14,19 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const session = request.cookies.get("session_user_id");
+  // Must match the cookie name set in lib/auth.ts
+  const session = request.cookies.get("repiq_session_user_id")?.value;
 
-  // 2. If already on /auth, don't redirect to /auth
+  // If already authenticated and trying to visit /auth, redirect to home
   if (pathname.startsWith("/auth")) {
+    if (session) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
     return NextResponse.next();
   }
 
-  // 3. If no session, redirect to /auth
-  if (!session?.value) {
+  // Unauthenticated user -> redirect to auth
+  if (!session) {
     return NextResponse.redirect(new URL("/auth", request.url));
   }
 

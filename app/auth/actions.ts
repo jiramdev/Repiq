@@ -38,33 +38,46 @@ export async function loginUser(formData: {
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const cleanId = formData.identifier.trim().toLowerCase();
-    const password = formData.password.trim();
+    const cleanPassword = formData.password.trim();
 
-    if (!cleanId || !password) {
+    if (!cleanId || !cleanPassword) {
       return { success: false, error: "Please fill in all fields." };
     }
 
-    // Match by email on users or email / username on user_profiles
-    const userRows = await sql`
-      SELECT u.id, up.password_hash
-      FROM users u
-      LEFT JOIN user_profiles up ON up.user_id = u.id
-      WHERE LOWER(TRIM(u.email)) = ${cleanId} 
-         OR LOWER(TRIM(up.email)) = ${cleanId}
-         OR LOWER(TRIM(up.username)) = ${cleanId}
+    // Direct lookup in user_profiles by email or username
+    let userRows = await sql`
+      SELECT user_id, password_hash
+      FROM user_profiles
+      WHERE LOWER(TRIM(email)) = ${cleanId}
+         OR LOWER(TRIM(username)) = ${cleanId}
       LIMIT 1
     `;
+
+    // Fallback: Check users table by email if not found above
+    if (userRows.length === 0) {
+      const u = await sql`
+        SELECT id FROM users WHERE LOWER(TRIM(email)) = ${cleanId} LIMIT 1
+      `;
+      if (u.length > 0) {
+        userRows = await sql`
+          SELECT user_id, password_hash
+          FROM user_profiles
+          WHERE user_id = ${u[0].id}
+          LIMIT 1
+        `;
+      }
+    }
 
     if (userRows.length === 0) {
       return { success: false, error: "Invalid username or password." };
     }
 
     const user = userRows[0];
-    if (user.password_hash && user.password_hash !== password) {
+    if (user.password_hash !== cleanPassword) {
       return { success: false, error: "Invalid username or password." };
     }
 
-    await setSessionUser(String(user.id));
+    await setSessionUser(String(user.user_id));
     revalidatePath("/", "page");
     revalidatePath("/account", "page");
     return { success: true };
