@@ -1,8 +1,7 @@
 // app/workout/[id]/workout-view.tsx
 "use client";
 
-import { useState, useEffect, useRef, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useTransition } from "react";
 import {
   Header,
   CloseButton,
@@ -68,7 +67,7 @@ async function subscribeToPush() {
       });
     }
   } catch (err) {
-    console.error("Push subscription fout:", err);
+    console.error("Push subscription error:", err);
   }
 }
 
@@ -81,7 +80,6 @@ export function WorkoutView({
   logs: WorkoutLog[];
   allowRestNotification?: boolean;
 }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const [logs, setLogs] = useState<WorkoutLog[]>(() =>
@@ -104,18 +102,18 @@ export function WorkoutView({
 
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Doel-eindtijdstip in milliseconden voor scherm-UI
+  // Absolute end timestamp in ms for screen UI
   const [targetEndTimestamp, setTargetEndTimestamp] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
-  // Registreer Service Worker bij mount
+  // Register Service Worker on initial mount
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(console.error);
     }
   }, []);
 
-  // UI countdown timer
+  // Visual countdown timer for screen display
   useEffect(() => {
     if (!targetEndTimestamp) {
       setRemainingSeconds(null);
@@ -169,9 +167,16 @@ export function WorkoutView({
     restSeconds: number
   ) => {
     const nextVal = !current;
+
+    // Optimistic UI update
     setLogs((prev) =>
       prev.map((l) => (l.id === logId ? { ...l, completed: nextVal } : l))
     );
+
+    // Save set status to database
+    startTransition(async () => {
+      await updateLogSet(logId, { completed: nextVal });
+    });
 
     if (nextVal) {
       const duration = restSeconds || 90;
@@ -182,22 +187,21 @@ export function WorkoutView({
         typeof window !== "undefined" &&
         "Notification" in window
       ) {
-        if (Notification.permission === "default") {
-          await Notification.requestPermission();
+        let permission = Notification.permission;
+        if (permission === "default") {
+          permission = await Notification.requestPermission();
         }
 
-        if (Notification.permission === "granted") {
+        if (permission === "granted") {
           await subscribeToPush();
-          scheduleServerRestPush(duration, workout.id);
+          // Dispatch background push schedule to server without awaiting UI blocking
+          scheduleServerRestPush(duration, workout.id).catch(console.error);
         }
       }
     } else {
+      // Unchecked: reset visual countdown
       setTargetEndTimestamp(null);
     }
-
-    startTransition(async () => {
-      await updateLogSet(logId, { completed: nextVal });
-    });
   };
 
   const formatTimer = (secs: number) => {
@@ -226,7 +230,7 @@ export function WorkoutView({
   };
 
   const handleDiscard = () => {
-    if (confirm("Workout sessie verwijderen?")) {
+    if (confirm("Discard this workout session?")) {
       setTargetEndTimestamp(null);
       setRemainingSeconds(null);
       setLogs([]);
@@ -250,7 +254,7 @@ export function WorkoutView({
           <CloseButton onClick={handleDiscard} label="Close" />
         </Header>
 
-        {/* Bovenste Hero Rust Timer */}
+        {/* Top Hero Rest Timer */}
         {remainingSeconds !== null && (
           <div className={`${card} text-left`}>
             <p className={label}>Rest</p>
@@ -260,7 +264,7 @@ export function WorkoutView({
           </div>
         )}
 
-        {/* Actieve Oefening Card */}
+        {/* Active Exercise Card */}
         <Section
           label={<span className={display}>{currentExercise.name}</span>}
           meta={
@@ -269,7 +273,7 @@ export function WorkoutView({
               : `${currentStep + 1}/${exercises.length}`
           }
         >
-          {/* Kolomtitels */}
+          {/* Column Headers */}
           <div className="grid grid-cols-12 gap-2 text-center items-center px-2 pt-1">
             <span className={`${label} col-span-2 text-left`}>Set</span>
             <span className={`${label} col-span-4`}>Kg</span>
@@ -277,7 +281,7 @@ export function WorkoutView({
             <span className={`${label} col-span-2 text-right`}>Done</span>
           </div>
 
-          {/* Sets voor Huidige Oefening */}
+          {/* Sets for Current Exercise */}
           <div className={s.tight}>
             {currentExercise.sets.map((set) => {
               const weightPlaceholder =
@@ -354,7 +358,7 @@ export function WorkoutView({
           </div>
         </Section>
 
-        {/* Knoppen Navigatie / Afronden */}
+        {/* Navigation & Controls */}
         <div
           className={`pt-2 ${
             !isFirstExercise ? "grid grid-cols-2 gap-2" : ""
