@@ -3,97 +3,54 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Dumbbell,
-  CalendarDays,
-  Layers,
-  BarChart2,
-  User,
-} from "lucide-react";
+import { LayoutGrid, Calendar, BarChart2, User } from "lucide-react";
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-  matches: (pathname: string) => boolean;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    label: "Workout",
-    href: "/",
-    icon: Dumbbell,
-    matches: (pathname) => pathname === "/" || pathname.startsWith("/workout"),
-  },
-  {
-    label: "Schedule",
-    href: "/schedule",
-    icon: CalendarDays,
-    matches: (pathname) => pathname.startsWith("/schedule"),
-  },
-  {
-    label: "Plans",
-    href: "/plans",
-    icon: Layers,
-    matches: (pathname) => pathname.startsWith("/plans"),
-  },
-  {
-    label: "Stats",
-    href: "/statistics",
-    icon: BarChart2,
-    matches: (pathname) => pathname.startsWith("/statistics"),
-  },
-  {
-    label: "Account",
-    href: "/account",
-    icon: User,
-    matches: (pathname) => pathname.startsWith("/account"),
-  },
+const NAV_ITEMS = [
+  { href: "/", label: "Workouts", icon: LayoutGrid },
+  { href: "/schedule", label: "Schedule", icon: Calendar },
+  { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/account", label: "Account", icon: User },
 ];
 
 export function BottomDock() {
   const pathname = usePathname();
 
-  // Hide the dock on auth / onboarding screens or when inside an active workout session
-  if (pathname.startsWith("/auth") || /^\/workout\/\d+$/.test(pathname)) {
+  // Hide the floating dock on authentication screens
+  if (pathname.startsWith("/auth")) {
     return null;
   }
 
   return (
-    <nav
-      aria-label="Main Navigation"
-      className="fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-50 flex justify-center items-center pointer-events-none px-4"
-    >
-      <div className="pointer-events-auto flex items-center gap-1.5 p-1.5 rounded-full bg-[#141416]/85 backdrop-blur-xl border border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.03)] transition-all duration-300">
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.matches(pathname);
-          const Icon = item.icon;
+    <div className="fixed bottom-6 inset-x-0 flex justify-center items-center pointer-events-none z-50 px-5">
+      <nav
+        aria-label="Bottom Navigation"
+        className="pointer-events-auto flex items-center justify-between w-full max-w-[320px] px-7 py-3 rounded-full bg-[#1b1b1e] border border-white/[0.05] shadow-[0_12px_36px_rgba(0,0,0,0.45)]"
+      >
+        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          const isActive =
+            href === "/"
+              ? pathname === "/" || pathname.startsWith("/workout")
+              : pathname.startsWith(href);
 
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              aria-label={item.label}
-              className={`group relative flex items-center justify-center w-12 h-12 rounded-full transition-all duration-200 apple-press ${
-                isActive
-                  ? "bg-[#baa3d0] text-[#141416] shadow-md shadow-[#baa3d0]/20"
-                  : "text-[#71717a] hover:text-white hover:bg-white/[0.05]"
-              }`}
+              key={href}
+              href={href}
+              aria-label={label}
+              className="relative p-2 rounded-full transition-transform duration-150 active:scale-90 flex items-center justify-center group"
             >
               <Icon
-                className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${
-                  isActive ? "stroke-[2.2]" : "stroke-[1.8]"
+                strokeWidth={1.8}
+                className={`w-[21px] h-[21px] transition-colors duration-200 ${
+                  isActive
+                    ? "text-white"
+                    : "text-[#5e5d66] group-hover:text-white/80"
                 }`}
               />
-
-              {/* Hover indicator dot for inactive tabs */}
-              {!isActive && (
-                <span className="absolute bottom-1 w-1 h-1 rounded-full bg-[#baa3d0] opacity-0 group-hover:opacity-100 transition-opacity" />
-              )}
             </Link>
           );
         })}
-      </div>
-    </nav>
+      </nav>
+    </div>
   );
 }
