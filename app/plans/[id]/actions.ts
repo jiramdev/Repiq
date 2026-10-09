@@ -4,17 +4,17 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sql } from "@/lib/db";
-
-const CURRENT_USER_ID = "user_demo_1";
+import { getActiveUserId } from "@/lib/auth";
 
 export async function updatePlanTitle(planId: number, title: string) {
+  const userId = await getActiveUserId();
   const cleanTitle = title.trim();
   if (!cleanTitle) return;
 
   await sql`
     UPDATE plans
     SET title = ${cleanTitle}
-    WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+    WHERE id = ${planId} AND user_id = ${userId}
   `;
 
   revalidatePath(`/plans/${planId}`);
@@ -29,12 +29,13 @@ export async function addExerciseToPlan(
   reps: number,
   restSeconds: number
 ) {
+  const userId = await getActiveUserId();
   const cleanName = exerciseName.trim();
   if (!cleanName) return;
 
   let exerciseRows = await sql`
     SELECT id FROM exercises
-    WHERE (user_id = ${CURRENT_USER_ID} OR user_id IS NULL)
+    WHERE (user_id = ${userId} OR user_id IS NULL)
       AND TRIM(LOWER(name)) = TRIM(LOWER(${cleanName}))
     ORDER BY user_id NULLS LAST
     LIMIT 1
@@ -54,7 +55,7 @@ export async function addExerciseToPlan(
   } else {
     const inserted = await sql`
       INSERT INTO exercises (user_id, name, default_sets, default_reps, default_rest_seconds)
-      VALUES (${CURRENT_USER_ID}, ${cleanName}, ${sets}, ${reps}, ${restSeconds})
+      VALUES (${userId}, ${cleanName}, ${sets}, ${reps}, ${restSeconds})
       RETURNING id
     `;
     exerciseId = inserted[0].id;
@@ -73,12 +74,13 @@ export async function addExerciseToPlan(
     WHERE exercise_id = ${exerciseId}
   `;
 
+  // Update exercise_count using dynamic count
   await sql`
     UPDATE plans
     SET exercise_count = (
       SELECT COUNT(*)::int FROM plan_exercises WHERE plan_id = ${planId}
     )
-    WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+    WHERE id = ${planId} AND user_id = ${userId}
   `;
 
   revalidatePath(`/plans/${planId}`);
@@ -139,6 +141,8 @@ export async function updatePlanExercise(
 }
 
 export async function deleteExercise(planId: number, exerciseId: number) {
+  const userId = await getActiveUserId();
+
   await sql`
     DELETE FROM plan_exercises
     WHERE id = ${exerciseId} AND plan_id = ${planId}
@@ -149,7 +153,7 @@ export async function deleteExercise(planId: number, exerciseId: number) {
     SET exercise_count = (
       SELECT COUNT(*)::int FROM plan_exercises WHERE plan_id = ${planId}
     )
-    WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+    WHERE id = ${planId} AND user_id = ${userId}
   `;
 
   revalidatePath(`/plans/${planId}`);
@@ -158,9 +162,11 @@ export async function deleteExercise(planId: number, exerciseId: number) {
 }
 
 export async function deletePlan(planId: number) {
+  const userId = await getActiveUserId();
+
   const planRows = await sql`
     SELECT title FROM plans
-    WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+    WHERE id = ${planId} AND user_id = ${userId}
     LIMIT 1
   `;
 
@@ -171,17 +177,17 @@ export async function deletePlan(planId: number) {
       SET name = 'Rest',
           exercise_count = 0,
           completed = false
-      WHERE user_id = ${CURRENT_USER_ID}
+      WHERE user_id = ${userId}
         AND TRIM(LOWER(name)) = TRIM(LOWER(${planTitle}))
     `;
   }
 
   await sql`
     DELETE FROM plans
-    WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+    WHERE id = ${planId} AND user_id = ${userId}
   `;
 
   revalidatePath("/schedule", "page");
-  revalidatePath("/", "page");
+  revalidatePath("/");
   redirect("/schedule");
 }
