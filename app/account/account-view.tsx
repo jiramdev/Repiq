@@ -12,8 +12,6 @@ import {
   bodyText,
   label,
   display,
-  input,
-  hint,
   error as errorText,
   s,
 } from "@/components/ui";
@@ -155,12 +153,12 @@ export function AccountView({
           </div>
         </section>
 
-        {/* 2. Account Details - Always Editable In-Place */}
-        <Section label="Account Details" meta="profile settings">
-          <form onSubmit={handleAccountSubmit} className={`${s.stack} pt-1`}>
-            {/* Full Name */}
-            <div className={s.tight}>
-              <span className={label}>Full Name</span>
+        {/* 2. Account Details */}
+        <Section label="Account Details">
+          <form onSubmit={handleAccountSubmit} className="space-y-2 pt-1">
+            {/* Name */}
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Name</span>
               <input
                 type="text"
                 value={formData.name}
@@ -168,48 +166,30 @@ export function AccountView({
                   setFormData({ ...formData, name: e.target.value });
                   if (errorMessage) setErrorMessage(null);
                 }}
-                className={input}
+                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
               />
             </div>
 
-            {/* Age & Username */}
-            <div className="grid grid-cols-2 gap-3.5">
-              <div className={s.tight}>
-                <span className={label}>Age</span>
-                <input
-                  type="number"
-                  value={formData.age}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData,
-                      age: parseInt(e.target.value, 10) || 0,
-                    });
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  className={input}
-                />
-              </div>
-
-              <div className={s.tight}>
-                <span className={label}>Username</span>
-                <input
-                  type="text"
-                  value={formData.username}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData,
-                      username: e.target.value.replace(/^@+/, "").trim(),
-                    });
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  className={input}
-                />
-              </div>
+            {/* Age */}
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Age</span>
+              <input
+                type="number"
+                value={formData.age}
+                onChange={(e) => {
+                  setFormData({
+                    ...formData,
+                    age: parseInt(e.target.value, 10) || 0,
+                  });
+                  if (errorMessage) setErrorMessage(null);
+                }}
+                className="bg-transparent text-right font-medium text-white outline-none w-24"
+              />
             </div>
 
             {/* Email */}
-            <div className={s.tight}>
-              <span className={label}>Email</span>
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Email</span>
               <input
                 type="email"
                 value={formData.email}
@@ -217,57 +197,68 @@ export function AccountView({
                   setFormData({ ...formData, email: e.target.value });
                   if (errorMessage) setErrorMessage(null);
                 }}
-                className={input}
+                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate max-w-[200px]"
+              />
+            </div>
+
+            {/* Username */}
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Username</span>
+              <input
+                type="text"
+                value={formData.username}
+                onChange={(e) => {
+                  setFormData({
+                    ...formData,
+                    username: e.target.value.replace(/^@+/, "").trim(),
+                  });
+                  if (errorMessage) setErrorMessage(null);
+                }}
+                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
               />
             </div>
 
             {/* Current Password */}
-            <div className={s.tight}>
-              <div className="flex items-center justify-between">
-                <span className={label}>Current Password</span>
-                <span className={hint}>Required to change password</span>
-              </div>
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Current Password</span>
               <input
                 type="password"
-                placeholder="Enter current password"
+                placeholder="Current password"
                 value={currentPassword}
                 onChange={(e) => {
                   setCurrentPassword(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                className={input}
+                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
               />
             </div>
 
             {/* New Password */}
-            <div className={s.tight}>
-              <div className="flex items-center justify-between">
-                <span className={label}>New Password</span>
-                <span className={hint}>Leave blank to keep current</span>
-              </div>
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>New Password</span>
               <input
                 type="password"
-                placeholder="Enter new password"
+                placeholder="Leave blank to keep"
                 value={newPassword}
                 onChange={(e) => {
                   setNewPassword(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                className={input}
+                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
               />
             </div>
 
             {errorMessage && (
-              <p className={`${errorText} pt-1`}>{errorMessage}</p>
+              <p className={`${errorText} px-1 pt-1`}>{errorMessage}</p>
             )}
 
             {saveSuccess && (
-              <p className="text-emerald-400 text-xs font-semibold pt-1">
+              <p className="text-emerald-400 text-xs font-semibold px-1 pt-1">
                 Account details saved successfully.
               </p>
             )}
 
-            {/* Save & Cancel Buttons */}
+            {/* Actions */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               <Action variant="primary" type="submit" disabled={isPending}>
                 {isPending ? "Saving..." : "Save"}
