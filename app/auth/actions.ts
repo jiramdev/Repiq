@@ -24,11 +24,7 @@ export async function checkUsernameAvailable(
       LIMIT 1
     `;
 
-    if (existing.length > 0) {
-      return { available: false, error: "Username is already taken." };
-    }
-
-    return { available: true };
+    return { available: existing.length === 0 };
   } catch (err: any) {
     console.error("checkUsernameAvailable error:", err);
     return { available: true };
@@ -48,11 +44,12 @@ export async function loginUser(formData: {
     }
 
     const userRows = await sql`
-      SELECT u.id, COALESCE(up.password_hash, u.password_hash, u.password) AS password_hash
+      SELECT u.id, 
+             COALESCE(up.password_hash, u.password_hash, u.password, '') AS password_hash
       FROM users u
       LEFT JOIN user_profiles up ON up.user_id = u.id
       WHERE LOWER(TRIM(u.email)) = ${cleanId} 
-         OR LOWER(TRIM(COALESCE(up.username, u.username, ''))) = ${cleanId}
+         OR LOWER(TRIM(COALESCE(up.username, ''))) = ${cleanId}
       LIMIT 1
     `;
 
@@ -94,7 +91,7 @@ export async function registerAndOnboard(data: {
       return { success: false, error: "Please fill in all required fields." };
     }
 
-    // 1. Check if email already exists
+    // 1. Check existing email & username
     const existingEmail = await sql`
       SELECT id FROM users WHERE LOWER(TRIM(email)) = ${cleanEmail} LIMIT 1
     `;
@@ -102,78 +99,108 @@ export async function registerAndOnboard(data: {
       return { success: false, error: "Email is already registered." };
     }
 
-    // 2. Check if username exists in either table
     const existingUsername = await sql`
-      SELECT id FROM users WHERE LOWER(TRIM(username)) = ${cleanUsername}
-      UNION
-      SELECT user_id AS id FROM user_profiles WHERE LOWER(TRIM(username)) = ${cleanUsername}
-      LIMIT 1
+      SELECT user_id FROM user_profiles WHERE LOWER(TRIM(username)) = ${cleanUsername} LIMIT 1
     `;
     if (existingUsername.length > 0) {
       return { success: false, error: "Username is already taken." };
     }
 
-    // 3. Insert into users with all primary columns populated
-    // (Handles schema whether the column is named password or password_hash)
-    let newUser;
-    try {
-      newUser = await sql`
-        INSERT INTO users (name, username, email, password_hash)
-        VALUES (${cleanName}, ${cleanUsername}, ${cleanEmail}, ${cleanPassword})
-        RETURNING id
-      `;
-    } catch {
-      // Fallback if password column is called `password` instead of `password_hash`
-      newUser = await sql`
-        INSERT INTO users (name, username, email, password)
-        VALUES (${cleanName}, ${cleanUsername}, ${cleanEmail}, ${cleanPassword})
-        RETURNING id
-      `;
-    }
+    // 2. Discover columns on `users` table dynamically
+    const colRows = await sql`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'users'
+    `;
+    const userCols = new Set(colRows.map((r: any) => r.column_name.toLowerCase()));
 
-    if (!newUser || newUser.length === 0) {
-      return { success: false, error: "Failed to create user record." };
+    // 3. Insert into `users` strictly using existing columns
+    const hasName = userCols.has("name");
+    const hasPasswordHash = userCols.has("password_hash");
+    const hasPassword = userCols.has("password");
+
+    let newUser: any[];
+
+    if (hasName && hasPasswordHash) {
+      newUser = await sql`
+        INSERT INTO users (name, email, password_hash)
+        VALUES (${cleanName}, ${cleanEmail}, ${cleanPassword})
+        RETURNING id
+      `;
+    } else if (hasName && hasPassword) {
+      newUser = await sql`
+        INSERT INTO users (name, email, password)
+        VALUES (${cleanName}, ${cleanEmail}, ${cleanPassword})
+        RETURNING id
+      `;
+    } else if (hasPasswordHash) {
+      newUser = await sql`
+        INSERT INTO users (email, password_hash)
+        VALUES (${cleanEmail}, ${cleanPassword})
+        RETURNING id
+      `;
+    } else if (hasPassword) {
+      newUser = await sql`
+        INSERT INTO users (email, password)
+        VALUES (${cleanEmail}, ${cleanPassword})
+        RETURNING id
+      `;
+    } else if (hasName) {
+      newUser = await sql`
+        INSERT INTO users (name, email)
+        VALUES (${cleanName}, ${cleanEmail})
+        RETURNING id
+      `;
+    } else {
+      newUser = await sql`
+        INSERT INTO users (email)
+        VALUES (${cleanEmail})
+        RETURNING id
+      `;
     }
 
     const userId = newUser[0].id as number;
 
-    // 4. Populate or update user_profiles
-    try {
-      await sql`
-        INSERT INTO user_profiles (
-          user_id,
-          name,
-          username,
-          email,
-          age,
-          password_hash,
-          unit_system,
-          notify_workout_reminders,
-          notify_rest_day_alerts
-        ) VALUES (
-          ${userId},
-          ${cleanName},
-          ${cleanUsername},
-          ${cleanEmail},
-          ${data.age || 24},
-          ${cleanPassword},
-          'kg',
-          ${data.notify_workout_reminders ?? false},
-          ${data.notify_rest_day_alerts ?? false}
-        )
-        ON CONFLICT (user_id) DO UPDATE SET
-          name = EXCLUDED.name,
-          username = EXCLUDED.username,
-          email = EXCLUDED.email,
-          age = EXCLUDED.age,
-          notify_workout_reminders = EXCLUDED.notify_workout_reminders,
-          notify_rest_day_alerts = EXCLUDED.notify_rest_day_alerts
-      `;
-    } catch (profileErr) {
-      console.warn("user_profiles insert skipped or failed:", profileErr);
-    }
+    // 4. Discover columns on `user_profiles` table dynamically
+    const profileColRows = await sql`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'user_profiles'
+    `;
+    const profileCols = new Set(profileColRows.map((r: any) => r.column_name.toLowerCase()));
 
-    // 5. Seed default 7-day schedule (SUN - SAT)
+    // 5. Insert into `user_profiles` matching available columns
+    const pHasPassword = profileCols.has("password_hash");
+    const pHasUnit = profileCols.has("unit_system");
+    const pHasAge = profileCols.has("age");
+    const pHasReminders = profileCols.has("notify_workout_reminders");
+    const pHasRestAlerts = profileCols.has("notify_rest_day_alerts");
+
+    await sql`
+      INSERT INTO user_profiles (
+        user_id,
+        name,
+        username,
+        email
+        ${pHasAge ? sql`, age` : sql``}
+        ${pHasPassword ? sql`, password_hash` : sql``}
+        ${pHasUnit ? sql`, unit_system` : sql``}
+        ${pHasReminders ? sql`, notify_workout_reminders` : sql``}
+        ${pHasRestAlerts ? sql`, notify_rest_day_alerts` : sql``}
+      ) VALUES (
+        ${userId},
+        ${cleanName},
+        ${cleanUsername},
+        ${cleanEmail}
+        ${pHasAge ? sql`, ${data.age || 24}` : sql``}
+        ${pHasPassword ? sql`, ${cleanPassword}` : sql``}
+        ${pHasUnit ? sql`, 'kg'` : sql``}
+        ${pHasReminders ? sql`, ${data.notify_workout_reminders ?? false}` : sql``}
+        ${pHasRestAlerts ? sql`, ${data.notify_rest_day_alerts ?? false}` : sql``}
+      )
+    `;
+
+    // 6. Seed weekly workouts schedule
     const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
     for (const day of days) {
       await sql`
@@ -182,15 +209,15 @@ export async function registerAndOnboard(data: {
       `;
     }
 
-    // 6. Establish session cookie
+    // 7. Store session cookie
     await setSessionUser(userId);
     revalidatePath("/", "page");
     return { success: true };
   } catch (err: any) {
-    console.error("registerAndOnboard failed with database error:", err);
+    console.error("registerAndOnboard error:", err);
     return {
       success: false,
-      error: err.detail || err.message || "Database registration failed.",
+      error: err.detail || err.message || "Registration failed.",
     };
   }
 }
