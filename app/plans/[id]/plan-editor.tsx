@@ -15,7 +15,9 @@ import {
   meta,
   pill,
   pillText,
+  error as errorText,
 } from "@/components/ui";
+import { str } from "@/lib/strings";
 import {
   updatePlanTitle,
   addExerciseToPlan,
@@ -80,6 +82,8 @@ export function PlanEditor({
   const [repsValue, setRepsValue] = useState("10");
   const [isCustomReps, setIsCustomReps] = useState(false);
   const [restSeconds, setRestSeconds] = useState("90");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const resetForm = () => {
     setIsAdding(false);
@@ -91,6 +95,7 @@ export function PlanEditor({
     setRepsValue("10");
     setIsCustomReps(false);
     setRestSeconds("90");
+    setFormError(null);
   };
 
   const handleTitleBlur = () => {
@@ -153,14 +158,16 @@ export function PlanEditor({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!exerciseName.trim()) return;
+    setFormError(null);
 
     startTransition(async () => {
       const parsedSets = parseInt(setsValue, 10) || 3;
       const parsedReps = parseInt(repsValue, 10) || 10;
-      const parsedRest = parseInt(restSeconds, 10) || 90;
+      const parsedRest = Number.isFinite(parseInt(restSeconds, 10)) ? parseInt(restSeconds, 10) : 90;
 
+      let res: { success: boolean };
       if (editingExerciseId !== null) {
-        await updatePlanExercise(
+        res = await updatePlanExercise(
           plan.id,
           editingExerciseId,
           exerciseName,
@@ -169,13 +176,17 @@ export function PlanEditor({
           parsedRest
         );
       } else {
-        await addExerciseToPlan(
+        res = await addExerciseToPlan(
           plan.id,
           exerciseName,
           parsedSets,
           parsedReps,
           parsedRest
         );
+      }
+      if (!res.success) {
+        setFormError(str.plan.invalidInput);
+        return;
       }
       resetForm();
     });
@@ -191,11 +202,14 @@ export function PlanEditor({
   };
 
   const handleDeletePlan = () => {
-    if (confirm("Are you sure you want to delete this plan?")) {
-      startTransition(async () => {
-        await deletePlan(plan.id);
-      });
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      window.setTimeout(() => setConfirmDelete(false), 4000);
+      return;
     }
+    startTransition(async () => {
+      await deletePlan(plan.id);
+    });
   };
 
   const formatRest = (sec: number) => {
@@ -206,7 +220,7 @@ export function PlanEditor({
 
   const chosenExerciseTitle =
     selectedLibraryId === "custom"
-      ? exerciseName || "Custom Exercise"
+      ? exerciseName || str.plan.customExercise
       : library.find((l) => String(l.id) === selectedLibraryId)?.name ||
         exerciseName;
 
@@ -218,13 +232,14 @@ export function PlanEditor({
           <input
             type="text"
             autoFocus
-            placeholder="Exercise name (e.g. Incline Bench)"
+            maxLength={80}
+            placeholder={str.plan.exerciseNamePlaceholder}
             value={exerciseName}
             onChange={(e) => setExerciseName(e.target.value)}
             className={input}
           />
           <CloseButton
-            label="Back to selection"
+            label={str.plan.backToSelection}
             onClick={() => {
               setSelectedLibraryId("");
               setExerciseName("");
@@ -240,19 +255,19 @@ export function PlanEditor({
               chosenExerciseTitle ? bodyText : bodyMuted
             } truncate pointer-events-none font-medium`}
           >
-            {chosenExerciseTitle || "Choose Exercise"}
+            {chosenExerciseTitle || str.plan.chooseExercise}
           </span>
 
           <select
-            aria-label="Choose Exercise"
+            aria-label={str.plan.chooseExercise}
             value={selectedLibraryId}
             onChange={(e) => handleLibrarySelect(e.target.value)}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           >
             <option value="" disabled>
-              Choose Exercise
+              {str.plan.chooseExercise}
             </option>
-            <option value="custom">+ New Exercise</option>
+            <option value="custom">{str.plan.newExercise}</option>
             <option value="divider" disabled>
               ──────────
             </option>
@@ -269,7 +284,7 @@ export function PlanEditor({
       <div className="grid grid-cols-3 gap-2">
         {/* Sets */}
         <div className={`${row} px-3 py-2 relative flex flex-col justify-center items-center`}>
-          <span className={meta}>Sets</span>
+          <span className={meta}>{str.plan.sets}</span>
           {isCustomSets ? (
             <input
               type="number"
@@ -280,7 +295,7 @@ export function PlanEditor({
               onBlur={() => {
                 if (!setsValue) setSetsValue("3");
               }}
-              className={`${value} bg-transparent w-full text-center outline-none`}
+              className={`${value} !text-[16px] bg-transparent w-full text-center outline-none select-text`}
             />
           ) : (
             <>
@@ -303,7 +318,7 @@ export function PlanEditor({
                     {num}
                   </option>
                 ))}
-                <option value="other">Other...</option>
+                <option value="other">{str.plan.other}</option>
               </select>
             </>
           )}
@@ -311,7 +326,7 @@ export function PlanEditor({
 
         {/* Reps */}
         <div className={`${row} px-3 py-2 relative flex flex-col justify-center items-center`}>
-          <span className={meta}>Reps</span>
+          <span className={meta}>{str.plan.reps}</span>
           {isCustomReps ? (
             <input
               type="number"
@@ -322,7 +337,7 @@ export function PlanEditor({
               onBlur={() => {
                 if (!repsValue) setRepsValue("10");
               }}
-              className={`${value} bg-transparent w-full text-center outline-none`}
+              className={`${value} !text-[16px] bg-transparent w-full text-center outline-none select-text`}
             />
           ) : (
             <>
@@ -345,7 +360,7 @@ export function PlanEditor({
                     {num}
                   </option>
                 ))}
-                <option value="other">Other...</option>
+                <option value="other">{str.plan.other}</option>
               </select>
             </>
           )}
@@ -353,7 +368,7 @@ export function PlanEditor({
 
         {/* Rest */}
         <div className={`${row} px-3 py-2 relative flex flex-col justify-center items-center`}>
-          <span className={meta}>Rest</span>
+          <span className={meta}>{str.plan.rest}</span>
           <span className={`${value} pointer-events-none`}>
             {formatRest(parseInt(restSeconds, 10))}
           </span>
@@ -363,6 +378,9 @@ export function PlanEditor({
             onChange={(e) => setRestSeconds(e.target.value)}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           >
+            {!REST_OPTIONS.some((o) => String(o.value) === restSeconds) && (
+              <option value={restSeconds}>{formatRest(parseInt(restSeconds, 10) || 0)}</option>
+            )}
             {REST_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
@@ -372,6 +390,8 @@ export function PlanEditor({
         </div>
       </div>
 
+      {formError && <p className={`${errorText} px-1`} role="alert">{formError}</p>}
+
       {/* Conditional Buttons: Save & Delete for existing, Save & Cancel for new */}
       <div className="grid grid-cols-2 gap-2 pt-1">
         <Action
@@ -379,7 +399,7 @@ export function PlanEditor({
           variant="primary"
           disabled={isPending || !exerciseName.trim()}
         >
-          Save
+          {str.common.save}
         </Action>
         {isEditing && targetId !== undefined ? (
           <Action
@@ -388,7 +408,7 @@ export function PlanEditor({
             disabled={isPending}
             onClick={() => handleDeleteExercise(targetId)}
           >
-            Delete
+            {str.common.delete}
           </Action>
         ) : (
           <Action
@@ -397,7 +417,7 @@ export function PlanEditor({
             disabled={isPending}
             onClick={resetForm}
           >
-            Cancel
+            {str.common.cancel}
           </Action>
         )}
       </div>
@@ -405,23 +425,24 @@ export function PlanEditor({
   );
 
   return (
-    <div className="min-h-screen bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
+    <div className="min-h-[100dvh] bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
       <main className="max-w-sm mx-auto space-y-3.5">
         <header className="flex items-center justify-between px-1 py-1">
           <BackButton href="/schedule" />
           <div className={pill}>
             <span className="w-2 h-2 rounded-full bg-[#baa3d0]" />
-            <span className={pillText}>Plan</span>
+            <span className={pillText}>{str.plan.badge}</span>
           </div>
         </header>
 
         {/* Plan Name */}
-        <Section label="Plan Name" meta="tap to edit">
+        <Section label={str.plan.name} meta={str.plan.nameMeta}>
           <div className="pt-1">
             <input
               type="text"
               value={title}
-              aria-label="Plan title"
+              aria-label={str.schedule.planTitle}
+              maxLength={60}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleTitleBlur}
               className={input}
@@ -430,27 +451,28 @@ export function PlanEditor({
         </Section>
 
         {/* Exercises */}
-        <Section label="Exercises" meta={`${exercises.length} total`}>
+        <Section label={str.plan.exercises} meta={str.plan.total(exercises.length)}>
           <div className="space-y-2 pt-1">
             {exercises.map((ex) =>
               editingExerciseId === ex.id ? (
                 <div key={ex.id}>{renderExerciseForm(true, ex.id)}</div>
               ) : (
-                <div
+                <button
+                  type="button"
                   key={ex.id}
                   onClick={() => handleStartEdit(ex)}
-                  className={`${row} px-5 py-3 flex items-center justify-between gap-3 cursor-pointer transition apple-press hover:border-white/20`}
+                  className={`${row} w-full text-left min-h-11 px-5 py-3 flex items-center justify-between gap-3 cursor-pointer transition apple-press hover:border-white/20`}
                 >
                   <div className="flex flex-col min-w-0">
                     <span className={`${bodyText} truncate font-medium`}>
                       {ex.name}
                     </span>
                     <span className={meta}>
-                      {ex.sets} sets × {ex.reps} reps · {formatRest(ex.rest_seconds)} rest
+                      {str.plan.summary(ex.sets, ex.reps, formatRest(ex.rest_seconds))}
                     </span>
                   </div>
-                  <span className={`${meta} text-[11px] text-[#baa3d0]`}>Edit</span>
-                </div>
+                  <span className={`${meta} text-[11px] text-[#baa3d0]`}>{str.common.edit}</span>
+                </button>
               )
             )}
 
@@ -463,7 +485,7 @@ export function PlanEditor({
                   type="button"
                   onClick={handleStartAdd}
                 >
-                  Add Exercise
+                  {str.plan.addExercise}
                 </Action>
               </div>
             )}
@@ -478,7 +500,7 @@ export function PlanEditor({
             disabled={isPending}
             onClick={handleDeletePlan}
           >
-            Delete Plan
+            {confirmDelete ? str.plan.confirmDeletePlan : str.plan.deletePlan}
           </Action>
         </div>
       </main>

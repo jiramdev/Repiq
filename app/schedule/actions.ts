@@ -1,12 +1,15 @@
+// app/schedule/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
-import { getActiveUserId } from "@/lib/auth";
+import { requireUserId } from "@/lib/auth";
+import { isDayLabel } from "@/lib/time";
+import { LIMITS, cleanText } from "@/lib/validation";
 
-export async function createPlan(title: string) {
-  const userId = await getActiveUserId();
-  const cleanTitle = title.trim();
+export async function createPlan(title: string): Promise<number | null> {
+  const userId = await requireUserId();
+  const cleanTitle = cleanText(title, LIMITS.planTitle);
   if (!cleanTitle) return null;
 
   const result = await sql`
@@ -17,84 +20,70 @@ export async function createPlan(title: string) {
 
   revalidatePath("/schedule", "page");
   revalidatePath("/", "page");
-  return result[0]?.id as number;
+  return Number(result[0]?.id) || null;
 }
 
+/** Set a weekday to a plan (by id) or to rest ("rest" / null). */
 export async function assignPlanToWorkout(
   dayLabel: string,
-  planId?: number | string | null
-) {
-  const userId = await getActiveUserId();
+  planValue?: number | string | null
+): Promise<{ success: boolean }> {
+  const userId = await requireUserId();
+  if (!isDayLabel(dayLabel)) return { success: false };
 
-  const workoutRows = await sql`
-    SELECT id FROM workouts
-    WHERE user_id = ${userId} AND day_label = ${dayLabel}
-    LIMIT 1
-  `;
-
-  const workoutId = workoutRows[0]?.id;
-
-  const planIdNum =
-    planId !== null && planId !== undefined && planId !== "rest"
-      ? typeof planId === "number"
-        ? planId
-        : parseInt(String(planId), 10)
-      : null;
-
-  if (planIdNum !== null && !isNaN(planIdNum)) {
-    const planRows = await sql`
-      SELECT title, exercise_count FROM plans
-      WHERE id = ${planIdNum} AND user_id = ${userId}
+  let plan: { id: number; title: string; exercise_count: number } | null = null;
+  if (planValue != null && planValue !== "rest") {
+    const planId = Number(planValue);
+    if (!Number.isInteger(planId)) return { success: false };
+    const rows = await sql`
+      SELECT id, title, exercise_count FROM plans
+      WHERE id = ${planId} AND user_id = ${userId}
       LIMIT 1
     `;
-    const plan = planRows[0];
-    const planName = plan?.title || "Workout";
-    const count = plan?.exercise_count || 0;
+    if (rows.length === 0) return { success: false };
+    plan = {
+      id: Number(rows[0].id),
+      title: String(rows[0].title),
+      exercise_count: Number(rows[0].exercise_count) || 0,
+    };
+  }
 
-    if (workoutId) {
-      await sql`
-        DELETE FROM workout_logs
-        WHERE workout_id = ${workoutId}
-      `;
+  const planId = plan?.id ?? null;
+  const name = plan?.title ?? "Rest";
+  const count = plan?.exercise_count ?? 0;
 
-      await sql`
-        UPDATE workouts
-        SET name = ${planName},
-            exercise_count = ${count},
-            completed = false
-        WHERE id = ${workoutId} AND user_id = ${userId}
-      `;
-    } else {
-      await sql`
-        INSERT INTO workouts (user_id, name, day_label, exercise_count, completed)
-        VALUES (${userId}, ${planName}, ${dayLabel}, ${count}, false)
-      `;
-    }
+  const updated = await sql`
+    UPDATE workouts
+    SET plan_id = ${planId}, name = ${name}, exercise_count = ${count}, completed = false
+    WHERE id = (
+      SELECT id FROM workouts
+      WHERE user_id = ${userId} AND day_label = ${dayLabel}
+      ORDER BY id
+      LIMIT 1
+    )
+    RETURNING id
+  `;
+
+  let workoutId: number;
+  if (updated.length > 0) {
+    workoutId = Number(updated[0].id);
+    // The plan changed: an unfinished session for the old plan no longer applies.
+    await sql`
+      DELETE FROM workout_sessions
+      WHERE workout_id = ${workoutId} AND user_id = ${userId} AND completed_at IS NULL
+        AND plan_id IS DISTINCT FROM ${planId}
+    `;
   } else {
-    if (workoutId) {
-      await sql`
-        DELETE FROM workout_logs
-        WHERE workout_id = ${workoutId}
-      `;
-
-      await sql`
-        UPDATE workouts
-        SET name = 'Rest',
-            exercise_count = 0,
-            completed = false
-        WHERE id = ${workoutId} AND user_id = ${userId}
-      `;
-    } else {
-      await sql`
-        INSERT INTO workouts (user_id, name, day_label, exercise_count, completed)
-        VALUES (${userId}, 'Rest', ${dayLabel}, 0, false)
-      `;
-    }
+    const inserted = await sql`
+      INSERT INTO workouts (user_id, plan_id, name, day_label, exercise_count, completed)
+      VALUES (${userId}, ${planId}, ${name}, ${dayLabel}, ${count}, false)
+      RETURNING id
+    `;
+    workoutId = Number(inserted[0].id);
   }
 
   revalidatePath("/schedule", "page");
   revalidatePath("/", "page");
-  if (workoutId) {
-    revalidatePath(`/workout/${workoutId}`, "page");
-  }
+  revalidatePath(`/workout/${workoutId}`, "page");
+  return { success: true };
 }

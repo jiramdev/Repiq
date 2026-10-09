@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { getActiveUserId } from "@/lib/auth";
+import { requireUserId } from "@/lib/auth";
 import { PlanEditor } from "./plan-editor";
 
 interface Plan {
@@ -42,7 +42,7 @@ async function PlanLoader({
     notFound();
   }
 
-  const userId = await getActiveUserId();
+  const userId = await requireUserId();
 
   const [planResult, exercisesResult, libraryResult] = await Promise.all([
     sql`
@@ -52,15 +52,21 @@ async function PlanLoader({
       LIMIT 1
     `,
     sql`
-      SELECT id, exercise_id, name, sets, reps, COALESCE(rest_seconds, 90) AS rest_seconds
-      FROM plan_exercises
-      WHERE plan_id = ${planId}
-      ORDER BY id ASC
+      SELECT pe.id, pe.exercise_id, pe.name, pe.sets, pe.reps, COALESCE(pe.rest_seconds, 90) AS rest_seconds
+      FROM plan_exercises pe
+      JOIN plans p ON p.id = pe.plan_id AND p.user_id = ${userId}
+      WHERE pe.plan_id = ${planId}
+      ORDER BY pe.id ASC
     `,
     sql`
-      SELECT id, name, default_sets, default_reps, default_rest_seconds
-      FROM exercises
-      WHERE user_id = ${userId} OR user_id IS NULL
+      -- The user's own copy of an exercise hides the shared one with the same name.
+      SELECT * FROM (
+        SELECT DISTINCT ON (lower(trim(name)))
+          id, name, default_sets, default_reps, default_rest_seconds
+        FROM exercises
+        WHERE user_id = ${userId} OR user_id IS NULL
+        ORDER BY lower(trim(name)), user_id NULLS LAST, id
+      ) lib
       ORDER BY name ASC
     `,
   ]);
@@ -86,7 +92,7 @@ export default function PlanEditPage({
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-[#baa3d0] text-white p-4">
+        <div className="min-h-[100dvh] bg-[#baa3d0] text-white p-4">
           <div className="max-w-sm mx-auto h-48 rounded-2xl bg-white/[0.04] animate-pulse" />
         </div>
       }
