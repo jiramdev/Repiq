@@ -3,12 +3,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
-  const session = request.cookies.get("repiq_session_user_id");
   const { pathname } = request.nextUrl;
 
-  // Allow static assets, api routes, and the auth screen
+  // 1. Allow static assets, images, icons, and API routes through
   if (
-    pathname.startsWith("/auth") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
     pathname.includes(".")
@@ -16,7 +14,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // If no session cookie, redirect to /auth
+  const session = request.cookies.get("session_user_id");
+
+  // 2. If already on /auth, don't redirect to /auth
+  if (pathname.startsWith("/auth")) {
+    return NextResponse.next();
+  }
+
+  // 3. If no session, redirect to /auth
   if (!session?.value) {
     return NextResponse.redirect(new URL("/auth", request.url));
   }
@@ -25,5 +30,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

@@ -43,8 +43,8 @@ export default function AuthPage() {
         password: formData.password,
       });
 
-      if (!res.success && res.error) {
-        setErrorMessage(res.error);
+      if (!res.success) {
+        setErrorMessage(res.error || "Login failed.");
         return;
       }
 
@@ -95,7 +95,6 @@ export default function AuthPage() {
         return;
       }
 
-      // Check username availability right now before moving to Step 3
       startTransition(async () => {
         const check = await checkUsernameAvailable(formData.username);
         if (!check.available) {
@@ -113,8 +112,8 @@ export default function AuthPage() {
     startTransition(async () => {
       const res = await registerAndOnboard(formData);
 
-      if (!res.success && res.error) {
-        setErrorMessage(res.error);
+      if (!res.success) {
+        setErrorMessage(res.error || "Registration failed.");
         return;
       }
 
@@ -154,6 +153,7 @@ export default function AuthPage() {
                   <input
                     type="text"
                     required
+                    autoFocus
                     placeholder="athlete or athlete@example.com"
                     value={formData.email}
                     onChange={(e) =>
@@ -296,7 +296,7 @@ export default function AuthPage() {
                     </span>
                   </button>
 
-                  {/* Rest Timer Toggle */}
+                  {/* Rest Timer Alerts Toggle */}
                   <button
                     type="button"
                     onClick={() => handleToggleNotification("notify_rest_day_alerts")}
@@ -359,7 +359,7 @@ export default function AuthPage() {
           )}
         </div>
 
-        {/* Separate Switch Button Under the Card (Hidden during Onboarding Steps 2 & 3) */}
+        {/* Mode Switch Button (Hidden once user proceeds past Step 1) */}
         {mode === "login" ? (
           <Action
             variant="secondary"

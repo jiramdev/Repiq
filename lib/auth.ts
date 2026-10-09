@@ -4,25 +4,26 @@ import { sql } from "@/lib/db";
 
 const SESSION_COOKIE = "repiq_session_user_id";
 
-export async function getActiveUserId(): Promise<number> {
+export async function getActiveUserId(): Promise<string> {
   const cookieStore = await cookies();
-  const rawId = cookieStore.get(SESSION_COOKIE)?.value;
+  const rawId = cookieStore.get(SESSION_COOKIE)?.value?.trim();
 
   if (rawId) {
-    const id = parseInt(rawId, 10);
-    if (!isNaN(id)) return id;
+    return rawId;
   }
 
   // Fallback to default user if no cookie exists
-  const defaultUser = await sql`SELECT id FROM users ORDER BY id ASC LIMIT 1`;
+  const defaultUser = await sql`
+    SELECT id FROM users ORDER BY created_at ASC NULLS LAST LIMIT 1
+  `;
   if (defaultUser.length > 0) {
-    return defaultUser[0].id as number;
+    return String(defaultUser[0].id);
   }
 
-  return 1;
+  return "user_demo_1";
 }
 
-export async function setSessionUser(userId: number) {
+export async function setSessionUser(userId: string) {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, String(userId), {
     httpOnly: true,
