@@ -23,8 +23,7 @@ export async function createPlan(title: string) {
 
 export async function assignPlanToWorkout(
   dayLabel: string,
-  planId?: number | string | null,
-  customName?: number | string | null
+  planId?: number | string | null
 ) {
   const userId = await getActiveUserId();
 
@@ -34,18 +33,13 @@ export async function assignPlanToWorkout(
     LIMIT 1
   `;
 
-  let workoutId = workoutRows[0]?.id;
+  const workoutId = workoutRows[0]?.id;
 
   const planIdNum =
     planId !== null && planId !== undefined && planId !== "rest"
       ? typeof planId === "number"
         ? planId
         : parseInt(String(planId), 10)
-      : null;
-
-  const resolvedCustomName =
-    customName !== null && customName !== undefined
-      ? String(customName).trim()
       : null;
 
   if (planIdNum !== null && !isNaN(planIdNum)) {
@@ -55,7 +49,7 @@ export async function assignPlanToWorkout(
       LIMIT 1
     `;
     const plan = planRows[0];
-    const planName = resolvedCustomName || plan?.title || "Workout";
+    const planName = plan?.title || "Workout";
     const count = plan?.exercise_count || 0;
 
     if (workoutId) {
@@ -71,9 +65,13 @@ export async function assignPlanToWorkout(
             completed = false
         WHERE id = ${workoutId} AND user_id = ${userId}
       `;
+    } else {
+      await sql`
+        INSERT INTO workouts (user_id, name, day_label, exercise_count, completed)
+        VALUES (${userId}, ${planName}, ${dayLabel}, ${count}, false)
+      `;
     }
   } else {
-    const fallbackName = resolvedCustomName || "Rest";
     if (workoutId) {
       await sql`
         DELETE FROM workout_logs
@@ -82,10 +80,15 @@ export async function assignPlanToWorkout(
 
       await sql`
         UPDATE workouts
-        SET name = ${fallbackName},
+        SET name = 'Rest',
             exercise_count = 0,
             completed = false
         WHERE id = ${workoutId} AND user_id = ${userId}
+      `;
+    } else {
+      await sql`
+        INSERT INTO workouts (user_id, name, day_label, exercise_count, completed)
+        VALUES (${userId}, 'Rest', ${dayLabel}, 0, false)
       `;
     }
   }

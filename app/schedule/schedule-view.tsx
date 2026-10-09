@@ -41,7 +41,7 @@ export function ScheduleView({
 
   const handleSelect = (item: ScheduleItem, planValue: string) => {
     startTransition(async () => {
-      await assignPlanToWorkout(item.day_label, planValue, item.id);
+      await assignPlanToWorkout(item.day_label, planValue);
     });
   };
 
@@ -67,7 +67,7 @@ export function ScheduleView({
               const nameClean = item.name ? item.name.trim() : "";
               const isRest = !nameClean || nameClean.toLowerCase() === "rest";
               const hasPlan = !isRest;
-              const currentPlan = planList.find((p) => p.title === nameClean);
+              const currentPlan = planList.find((p) => p.title.toLowerCase() === nameClean.toLowerCase());
               const currentValue = isRest
                 ? "rest"
                 : currentPlan
