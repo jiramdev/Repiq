@@ -206,7 +206,7 @@ export function AccountView({
                   setFormData({ ...formData, name: e.target.value });
                   if (accountError) setAccountError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
+                className={`bg-transparent text-right font-medium text-white outline-none flex-1 truncate ${bodyText}`}
               />
             </div>
 
@@ -222,7 +222,7 @@ export function AccountView({
                   });
                   if (accountError) setAccountError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white outline-none w-24"
+                className={`bg-transparent text-right font-medium text-white outline-none w-24 ${bodyText}`}
               />
             </div>
 
@@ -235,7 +235,7 @@ export function AccountView({
                   setFormData({ ...formData, email: e.target.value });
                   if (accountError) setAccountError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate max-w-[200px]"
+                className={`bg-transparent text-right font-medium text-white outline-none flex-1 truncate max-w-[200px] ${bodyText}`}
               />
             </div>
 
@@ -251,7 +251,7 @@ export function AccountView({
                   });
                   if (accountError) setAccountError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
+                className={`bg-transparent text-right font-medium text-white outline-none flex-1 truncate ${bodyText}`}
               />
             </div>
 
@@ -367,7 +367,7 @@ export function AccountView({
                   setCurrentPassword(e.target.value);
                   if (passwordError) setPasswordError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
+                className={`bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate ${bodyText}`}
               />
             </div>
 
@@ -381,7 +381,7 @@ export function AccountView({
                   setNewPassword(e.target.value);
                   if (passwordError) setPasswordError(null);
                 }}
-                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
+                className={`bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate ${bodyText}`}
               />
             </div>
 
