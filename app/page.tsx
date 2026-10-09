@@ -1,68 +1,186 @@
-import Image from "next/image";
+// app/page.tsx
+import { Suspense } from "react";
+import Link from "next/link";
+import { connection } from "next/server";
+import { sql } from "@/lib/db";
+import { getActiveUserId } from "@/lib/auth";
+import {
+  Header,
+  todayWidget,
+  card,
+  label,
+  metric,
+  bodyMuted,
+  page,
+  s,
+} from "@/components/ui";
+import { MorningWorkoutNotifier } from "./morning-notifier";
 
-export default function Home() {
+interface Workout {
+  id: number;
+  name: string;
+  day_label: string;
+  exercise_count: number;
+}
+
+interface Plan {
+  id: number;
+  title: string;
+  exercise_count: number;
+}
+
+const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+async function DashboardContent() {
+  await connection();
+  const userId = await getActiveUserId();
+
+  const now = new Date();
+  const currentDayLabel = DAY_LABELS[now.getDay()];
+
+  const [
+    workoutsResult,
+    plansResult,
+    latestWeight,
+    completedTodayCount,
+    allCompletedCount,
+    profileResult,
+  ] = await Promise.all([
+    sql`
+      SELECT id, name, day_label, exercise_count
+      FROM workouts 
+      WHERE user_id = ${userId} AND day_label = ${currentDayLabel}
+      LIMIT 1
+    `,
+    sql`
+      SELECT id, title, exercise_count 
+      FROM plans 
+      WHERE user_id = ${userId}
+    `,
+    sql`
+      SELECT value::float AS value, unit 
+      FROM metrics 
+      WHERE user_id = ${userId} AND type = 'weight' 
+      ORDER BY recorded_at DESC, id DESC 
+      LIMIT 1
+    `,
+    sql`
+      SELECT COUNT(*)::int AS count
+      FROM completed_sessions
+      WHERE user_id = ${userId} AND completed_date = CURRENT_DATE
+    `,
+    sql`
+      SELECT COUNT(*)::int AS count 
+      FROM completed_sessions
+      WHERE user_id = ${userId}
+    `,
+    sql`
+      SELECT notify_workout_reminders
+      FROM user_profiles
+      WHERE user_id = ${userId}
+      LIMIT 1
+    `,
+  ]);
+
+  const rawToday = (workoutsResult[0] as Workout) || null;
+  const activePlans = plansResult as Plan[];
+  const currentWeight = latestWeight[0]
+    ? {
+        value: Number(latestWeight[0].value),
+        unit: String(latestWeight[0].unit || "kg"),
+      }
+    : null;
+  const isDoneToday = (completedTodayCount[0]?.count ?? 0) > 0;
+  const totalCompleted = allCompletedCount[0]?.count ?? 0;
+  const notifyMorning = profileResult[0]?.notify_workout_reminders ?? true;
+
+  let todayWorkout: { id: number; name: string; exercise_count: number } | null = null;
+
+  if (rawToday && rawToday.name) {
+    const cleanName = rawToday.name.trim();
+    const matchedPlan = activePlans.find(
+      (p) => p.title.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+
+    if (cleanName.toLowerCase() !== "rest" && matchedPlan) {
+      todayWorkout = {
+        id: rawToday.id,
+        name: matchedPlan.title,
+        exercise_count: matchedPlan.exercise_count,
+      };
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <>
+      {/* Morning Reminder Notifier Hook */}
+      {!isDoneToday && (
+        <MorningWorkoutNotifier
+          enabled={notifyMorning}
+          workoutName={todayWorkout?.name ?? null}
+          exerciseCount={todayWorkout?.exercise_count ?? 0}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+      )}
+
+      {/* Today hero widget */}
+      {todayWorkout ? (
+        isDoneToday ? (
+          <div className={todayWidget}>
+            <p className={label}>Today · {currentDayLabel}</p>
+            <p className={`${metric} tracking-tight`}>Finished</p>
+            <p className={bodyMuted}>Workout completed today</p>
+          </div>
+        ) : (
+          <Link href={`/workout/${todayWorkout.id}`} className={todayWidget}>
+            <p className={label}>Today · {currentDayLabel}</p>
+            <p className={`${metric} tracking-tight`}>{todayWorkout.name}</p>
+            <p className={bodyMuted}>{todayWorkout.exercise_count} exercises scheduled</p>
+          </Link>
+        )
+      ) : (
+        <div className={todayWidget}>
+          <p className={label}>Today · {currentDayLabel}</p>
+          <p className={`${metric} tracking-tight`}>Rest Day</p>
+          <p className={bodyMuted}>Nothing scheduled</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      {/* Metric cards */}
+      <div className={`grid grid-cols-2 ${s.gap}`}>
+        <div className={`${card} text-center flex flex-col justify-between items-center aspect-square`}>
+          <span className={label}>Weight</span>
+          <span className={metric}>{currentWeight != null ? currentWeight.value : "—"}</span>
+          <span className={bodyMuted}>{currentWeight?.unit || "kg"}</span>
         </div>
+        <div className={`${card} text-center flex flex-col justify-between items-center aspect-square`}>
+          <span className={label}>Completed</span>
+          <span className={metric}>{totalCompleted}</span>
+          <span className={bodyMuted}>workouts</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <div className={page()}>
+      <main className={`max-w-sm mx-auto ${s.stack}`}>
+        <Header title="Dashboard" />
+
+        <Suspense
+          fallback={
+            <div className={`${s.stack} animate-pulse`}>
+              <div className={`${todayWidget} opacity-60 h-28`} />
+              <div className={`grid grid-cols-2 ${s.gap}`}>
+                <div className={`${card} aspect-square opacity-60`} />
+                <div className={`${card} aspect-square opacity-60`} />
+              </div>
+            </div>
+          }
+        >
+          <DashboardContent />
+        </Suspense>
       </main>
     </div>
   );
