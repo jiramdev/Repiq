@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
+import { getActiveUserId } from "@/lib/auth";
 import { PlanEditor } from "./plan-editor";
 
 interface Plan {
@@ -28,8 +29,6 @@ interface LibraryExercise {
   default_rest_seconds: number;
 }
 
-const CURRENT_USER_ID = "user_demo_1";
-
 async function PlanLoader({
   paramsPromise,
 }: {
@@ -43,11 +42,13 @@ async function PlanLoader({
     notFound();
   }
 
+  const userId = await getActiveUserId();
+
   const [planResult, exercisesResult, libraryResult] = await Promise.all([
     sql`
       SELECT id, title, exercise_count
       FROM plans
-      WHERE id = ${planId} AND user_id = ${CURRENT_USER_ID}
+      WHERE id = ${planId} AND user_id = ${userId}
       LIMIT 1
     `,
     sql`
@@ -59,7 +60,7 @@ async function PlanLoader({
     sql`
       SELECT id, name, default_sets, default_reps, default_rest_seconds
       FROM exercises
-      WHERE user_id = ${CURRENT_USER_ID} OR user_id IS NULL
+      WHERE user_id = ${userId} OR user_id IS NULL
       ORDER BY name ASC
     `,
   ]);
