@@ -7,17 +7,16 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 export async function loginUser(formData: {
-  identifier: string; // username or email
+  identifier: string;
   password: string;
 }): Promise<{ success: boolean; error?: string }> {
   const cleanId = formData.identifier.trim().toLowerCase();
   const password = formData.password.trim();
 
   if (!cleanId || !password) {
-    return { success: false, error: "Vul alle velden in." };
+    return { success: false, error: "Please fill in all fields." };
   }
 
-  // Search by email in users/profiles or by username in user_profiles
   const userRows = await sql`
     SELECT u.id, up.password_hash
     FROM users u
@@ -27,12 +26,12 @@ export async function loginUser(formData: {
   `;
 
   if (userRows.length === 0) {
-    return { success: false, error: "Gebruiker niet gevonden." };
+    return { success: false, error: "Invalid username or password." };
   }
 
   const user = userRows[0];
   if (user.password_hash && user.password_hash !== password) {
-    return { success: false, error: "Wachtwoord is onjuist." };
+    return { success: false, error: "Invalid username or password." };
   }
 
   await setSessionUser(user.id);
@@ -47,7 +46,8 @@ export async function registerAndOnboard(data: {
   email: string;
   password: string;
   age: number;
-  unit_system: "kg" | "lbs";
+  notify_workout_reminders: boolean;
+  notify_rest_day_alerts: boolean;
 }): Promise<{ success: boolean; error?: string }> {
   const cleanName = data.name.trim();
   const cleanUsername = data.username.replace(/^@+/, "").trim().toLowerCase();
@@ -55,23 +55,21 @@ export async function registerAndOnboard(data: {
   const cleanPassword = data.password.trim();
 
   if (!cleanName || !cleanUsername || !cleanEmail || !cleanPassword) {
-    return { success: false, error: "Vul alle verplichte velden in." };
+    return { success: false, error: "Please fill in all required fields." };
   }
 
-  // Check username collision
   const existingUsername = await sql`
     SELECT user_id FROM user_profiles WHERE LOWER(username) = ${cleanUsername} LIMIT 1
   `;
   if (existingUsername.length > 0) {
-    return { success: false, error: "Gebruikersnaam is al bezet." };
+    return { success: false, error: "Username is already taken." };
   }
 
-  // Check email collision
   const existingEmail = await sql`
     SELECT id FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1
   `;
   if (existingEmail.length > 0) {
-    return { success: false, error: "Dit e-mailadres is al in gebruik." };
+    return { success: false, error: "Email is already registered." };
   }
 
   // 1. Create User
@@ -88,8 +86,8 @@ export async function registerAndOnboard(data: {
       user_id, name, username, email, age, password_hash, unit_system, 
       notify_workout_reminders, notify_rest_day_alerts
     ) VALUES (
-      ${userId}, ${cleanName}, ${cleanUsername}, ${cleanEmail}, ${data.age || 20},
-      ${cleanPassword}, ${data.unit_system || "kg"}, true, true
+      ${userId}, ${cleanName}, ${cleanUsername}, ${cleanEmail}, ${data.age || 24},
+      ${cleanPassword}, 'kg', ${data.notify_workout_reminders}, ${data.notify_rest_day_alerts}
     )
   `;
 

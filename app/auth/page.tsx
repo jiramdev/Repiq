@@ -9,7 +9,9 @@ import {
   display,
   s,
   error as errorText,
-  rond,
+  row,
+  value,
+  hint,
 } from "@/components/ui";
 import { loginUser, registerAndOnboard } from "./actions";
 
@@ -27,7 +29,8 @@ export default function AuthPage() {
     email: "",
     password: "",
     age: 24,
-    unit_system: "kg" as "kg" | "lbs",
+    notify_workout_reminders: true,
+    notify_rest_day_alerts: true,
   });
 
   const handleLogin = (e: React.FormEvent) => {
@@ -49,6 +52,20 @@ export default function AuthPage() {
     });
   };
 
+  const handleToggleNotification = async (
+    field: "notify_workout_reminders" | "notify_rest_day_alerts"
+  ) => {
+    const nextVal = !formData[field];
+
+    if (nextVal && typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+    }
+
+    setFormData((prev) => ({ ...prev, [field]: nextVal }));
+  };
+
   const handleFinishOnboarding = () => {
     setErrorMessage(null);
 
@@ -65,7 +82,7 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#baa3d0] flex items-center justify-center p-4">
+    <div className="fixed inset-0 h-[100dvh] w-full bg-[#baa3d0] flex items-center justify-center p-4 overflow-hidden -mb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
       <div className="w-full max-w-sm space-y-3">
         {/* Main Card Block */}
         <div className={`bg-[#141416] text-white rounded-3xl p-6 shadow-2xl border border-white/[0.08] ${s.stack}`}>
@@ -78,7 +95,7 @@ export default function AuthPage() {
                 ? "Create Account"
                 : step === 2
                 ? "Athlete Profile"
-                : "Units"}
+                : "Notifications"}
             </h1>
             {mode === "onboarding" && (
               <span className="text-xs text-[#71717a] font-medium">
@@ -214,42 +231,54 @@ export default function AuthPage() {
               )}
 
               {step === 3 && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="space-y-2 pt-1">
+                  {/* Workout Reminders Toggle */}
                   <button
                     type="button"
-                    onClick={() =>
-                      setFormData({ ...formData, unit_system: "kg" })
-                    }
-                    className={`py-3 px-4 ${rond} border text-center font-semibold text-xs tracking-wider uppercase transition apple-press ${
-                      formData.unit_system === "kg"
-                        ? "bg-[#baa3d0] border-[#baa3d0] text-[#141416]"
-                        : "bg-[#141416] border-white/[0.08] text-white"
-                    }`}
+                    onClick={() => handleToggleNotification("notify_workout_reminders")}
+                    className={`${row} w-full px-4 py-3 flex items-center justify-between transition apple-press text-left`}
                   >
-                    Metric (kg)
+                    <div className="flex flex-col pr-2">
+                      <span className={value}>Workout Reminders</span>
+                      <span className={hint}>Morning notification for daily plan</span>
+                    </div>
+                    <span
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        formData.notify_workout_reminders
+                          ? "bg-[#baa3d0] text-[#141416]"
+                          : "bg-white/[0.08] text-white/50"
+                      }`}
+                    >
+                      {formData.notify_workout_reminders ? "ON" : "OFF"}
+                    </span>
                   </button>
 
+                  {/* Rest Timer Toggle */}
                   <button
                     type="button"
-                    onClick={() =>
-                      setFormData({ ...formData, unit_system: "lbs" })
-                    }
-                    className={`py-3 px-4 ${rond} border text-center font-semibold text-xs tracking-wider uppercase transition apple-press ${
-                      formData.unit_system === "lbs"
-                        ? "bg-[#baa3d0] border-[#baa3d0] text-[#141416]"
-                        : "bg-[#141416] border-white/[0.08] text-white"
-                    }`}
+                    onClick={() => handleToggleNotification("notify_rest_day_alerts")}
+                    className={`${row} w-full px-4 py-3 flex items-center justify-between transition apple-press text-left`}
                   >
-                    Imperial (lbs)
+                    <div className="flex flex-col pr-2">
+                      <span className={value}>Rest Timer Alerts</span>
+                      <span className={hint}>Notification when rest period ends</span>
+                    </div>
+                    <span
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        formData.notify_rest_day_alerts
+                          ? "bg-[#baa3d0] text-[#141416]"
+                          : "bg-white/[0.08] text-white/50"
+                      }`}
+                    >
+                      {formData.notify_rest_day_alerts ? "ON" : "OFF"}
+                    </span>
                   </button>
                 </div>
               )}
 
               {errorMessage && <p className={errorText}>{errorMessage}</p>}
 
-              <div
-                className={`pt-1 ${step > 1 ? "grid grid-cols-2 gap-2" : ""}`}
-              >
+              <div className={`pt-1 ${step > 1 ? "grid grid-cols-2 gap-2" : ""}`}>
                 {step > 1 && (
                   <Action
                     variant="secondary"
@@ -269,15 +298,11 @@ export default function AuthPage() {
                     type="button"
                     onClick={() => {
                       if (step === 1 && (!formData.email || !formData.password)) {
-                        setErrorMessage(
-                          "Please enter both email and password."
-                        );
+                        setErrorMessage("Please enter both email and password.");
                         return;
                       }
                       if (step === 2 && (!formData.name || !formData.username)) {
-                        setErrorMessage(
-                          "Please enter your name and username."
-                        );
+                        setErrorMessage("Please enter your name and username.");
                         return;
                       }
                       setErrorMessage(null);
