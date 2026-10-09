@@ -1,7 +1,7 @@
 // app/statistics/statistics-view.tsx
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   Header,
   Section,
@@ -11,130 +11,124 @@ import {
   bodyMuted,
   Action,
   input,
+  error as errorText,
 } from "@/components/ui";
+import { str } from "@/lib/strings";
+import type { WeightUnit } from "@/lib/units";
 import { logWeight } from "./actions";
-
-interface CompletedDateEntry {
-  date_str: string;
-}
-
-const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 export function StatisticsView({
   totalWorkouts,
   currentWeight,
+  unit,
+  today,
   completedDates,
 }: {
   totalWorkouts: number;
   currentWeight: number | null;
-  completedDates: CompletedDateEntry[];
+  unit: WeightUnit;
+  /** Today in the user's timezone (month is 1-12). */
+  today: { date: string; year: number; month: number };
+  completedDates: string[];
 }) {
   const [isPending, startTransition] = useTransition();
   const [isEditingWeight, setIsEditingWeight] = useState(false);
   const [displayedWeight, setDisplayedWeight] = useState<number | null>(currentWeight);
-  const [weightInput, setWeightInput] = useState(
-    currentWeight != null ? String(currentWeight) : ""
-  );
+  const [weightInput, setWeightInput] = useState(currentWeight != null ? String(currentWeight) : "");
+  const [weightError, setWeightError] = useState<string | null>(null);
 
-  // Sync state when server props revalidate
-  useEffect(() => {
-    setDisplayedWeight(currentWeight);
-    if (currentWeight != null) {
-      setWeightInput(String(currentWeight));
-    }
-  }, [currentWeight]);
+  const completedSet = new Set(completedDates);
 
-  const completedSet = new Set(completedDates.map((d) => d.date_str));
+  const { year, month } = today;
+  const monthIndex = month - 1;
+  const monthName = new Date(Date.UTC(year, monthIndex, 1)).toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
+  const firstDay = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const totalDaysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const firstDayIndex = firstDay === 0 ? 6 : firstDay - 1;
 
-  // Current Month Calendar
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const todayDateStr = now.toISOString().split("T")[0];
-  const monthName = now.toLocaleString("default", { month: "long" });
-
-  const firstDay = new Date(year, month, 1);
-  const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDayIndex = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-
-  const calendarCells = [];
-  for (let i = 0; i < firstDayIndex; i++) {
-    calendarCells.push(null);
-  }
+  const calendarCells: ({ dayNumber: number; dateStr: string; isCompleted: boolean; isToday: boolean } | null)[] = [];
+  for (let i = 0; i < firstDayIndex; i++) calendarCells.push(null);
   for (let d = 1; d <= totalDaysInMonth; d++) {
-    const formatted = `${year}-${String(month + 1).padStart(2, "0")}-${String(
-      d
-    ).padStart(2, "0")}`;
+    const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     calendarCells.push({
       dayNumber: d,
-      dateStr: formatted,
-      isCompleted: completedSet.has(formatted),
-      isToday: formatted === todayDateStr,
+      dateStr,
+      isCompleted: completedSet.has(dateStr),
+      isToday: dateStr === today.date,
     });
   }
 
   const handleWeightSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(weightInput);
-    if (!val || isNaN(val)) return;
+    const val = parseFloat(weightInput.replace(",", "."));
+    if (!Number.isFinite(val) || val <= 0) {
+      setWeightError(str.statistics.invalidWeight);
+      return;
+    }
 
-    // Optimistic UI update
+    const previous = displayedWeight;
     setDisplayedWeight(val);
     setIsEditingWeight(false);
+    setWeightError(null);
 
     startTransition(async () => {
-      await logWeight(val);
+      try {
+        const res = await logWeight(val);
+        if (!res.success) throw new Error("rejected");
+      } catch {
+        setDisplayedWeight(previous);
+        setIsEditingWeight(true);
+        setWeightError(str.statistics.invalidWeight);
+      }
     });
   };
 
   return (
-    <div className="min-h-screen bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
+    <div className="min-h-[100dvh] bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
       <main className="max-w-sm mx-auto space-y-3.5">
-        <Header title="Statistics" />
+        <Header title={str.statistics.title} />
 
-        {/* 2-Column Metric Grid */}
         <div className="grid grid-cols-2 gap-3.5">
-          <div
-            className={`${card} text-center flex flex-col justify-between items-center aspect-square`}
-          >
-            <span className={label}>Total</span>
+          <div className={`${card} text-center flex flex-col justify-between items-center aspect-square`}>
+            <span className={label}>{str.statistics.total}</span>
             <span className={metric}>{totalWorkouts}</span>
-            <span className={bodyMuted}>workouts</span>
+            <span className={bodyMuted}>{str.statistics.workouts}</span>
           </div>
 
-          <div
+          <button
+            type="button"
             onClick={() => !isEditingWeight && setIsEditingWeight(true)}
             className={`${card} text-center flex flex-col justify-between items-center aspect-square cursor-pointer transition apple-press`}
           >
-            <span className={label}>Weight</span>
+            <span className={label}>{str.statistics.weight}</span>
             <span className={metric}>{displayedWeight ?? "—"}</span>
-            <span className={bodyMuted}>kg · tap to log</span>
-          </div>
+            <span className={bodyMuted}>{str.statistics.tapToLog(unit)}</span>
+          </button>
         </div>
 
-        {/* Weight Input Drawer */}
         {isEditingWeight && (
-          <form
-            onSubmit={handleWeightSubmit}
-            className={`${card} space-y-2.5 pt-3`}
-          >
-            <span className={label}>Log Today&apos;s Weight</span>
+          <form onSubmit={handleWeightSubmit} className={`${card} space-y-2.5 pt-3`}>
+            <span className={label}>{str.statistics.logWeight}</span>
             <input
-              type="number"
-              step="0.1"
+              type="text"
+              inputMode="decimal"
               autoFocus
-              placeholder="e.g. 78.5"
+              aria-label={str.statistics.logWeight}
+              placeholder={str.statistics.weightPlaceholder(unit)}
               value={weightInput}
-              onChange={(e) => setWeightInput(e.target.value)}
+              onChange={(e) => {
+                setWeightInput(e.target.value);
+                setWeightError(null);
+              }}
               className={input}
             />
+            {weightError && <p className={`${errorText} px-1`} role="alert">{weightError}</p>}
             <div className="grid grid-cols-2 gap-2 pt-1">
-              <Action
-                variant="primary"
-                type="submit"
-                disabled={isPending || !weightInput}
-              >
-                Save
+              <Action variant="primary" type="submit" disabled={isPending || !weightInput}>
+                {str.common.save}
               </Action>
               <Action
                 variant="secondary"
@@ -142,53 +136,45 @@ export function StatisticsView({
                 onClick={() => {
                   setWeightInput(displayedWeight != null ? String(displayedWeight) : "");
                   setIsEditingWeight(false);
+                  setWeightError(null);
                 }}
               >
-                Cancel
+                {str.common.cancel}
               </Action>
             </div>
           </form>
         )}
 
-        {/* Activity Calendar Card */}
-        <Section label="Activity" meta={`${monthName} ${year}`}>
+        <Section label={str.statistics.activity} meta={`${monthName} ${year}`}>
           <div className={`${card} p-4 space-y-3`}>
             <div className="grid grid-cols-7 gap-1 text-center">
-              {WEEKDAYS.map((w, idx) => (
-                <span
-                  key={idx}
-                  className="text-[11px] font-semibold text-white/40 uppercase"
-                >
+              {str.statistics.weekdays.map((w, idx) => (
+                <span key={idx} className="text-[11px] font-semibold text-white/40 uppercase">
                   {w}
                 </span>
               ))}
             </div>
 
             <div className="grid grid-cols-7 gap-1 text-center">
-              {calendarCells.map((cell, idx) => {
-                if (!cell) {
-                  return <div key={`empty-${idx}`} className="h-8 w-8" />;
-                }
-
-                return (
-                  <div
-                    key={cell.dateStr}
-                    className="flex items-center justify-center h-8 w-8 mx-auto"
-                  >
+              {calendarCells.map((cell, idx) =>
+                !cell ? (
+                  <div key={`empty-${idx}`} className="h-8 w-8" />
+                ) : (
+                  <div key={cell.dateStr} className="flex items-center justify-center h-8 w-8 mx-auto">
                     <div
                       className={`h-7 w-7 rounded-full flex items-center justify-center text-[12px] font-semibold transition ${
                         cell.isCompleted
                           ? "bg-[#baa3d0] text-[#141416] font-bold shadow-sm"
                           : cell.isToday
-                          ? "border border-[#baa3d0] text-white"
-                          : "text-white/70"
+                            ? "border border-[#baa3d0] text-white"
+                            : "text-white/70"
                       }`}
                     >
                       {cell.dayNumber}
                     </div>
                   </div>
-                );
-              })}
+                )
+              )}
             </div>
           </div>
         </Section>
