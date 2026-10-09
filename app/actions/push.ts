@@ -5,9 +5,6 @@ import webPush from "web-push";
 import { sql } from "@/lib/db";
 import { getActiveUserId } from "@/lib/auth";
 
-// Allow function to remain active for rest intervals
-export const maxDuration = 120;
-
 webPush.setVapidDetails(
   process.env.VAPID_SUBJECT || "mailto:support@repiq.app",
   process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
@@ -28,44 +25,4 @@ export async function saveSubscription(sub: {
   `;
 
   return { success: true };
-}
-
-export async function scheduleServerRestPush(
-  restSeconds: number,
-  workoutId: number
-) {
-  const userId = await getActiveUserId();
-
-  const subscriptions = await sql`
-    SELECT endpoint, p256dh, auth 
-    FROM push_subscriptions 
-    WHERE user_id = ${userId}
-  `;
-
-  if (subscriptions.length === 0) return;
-
-  // Await the timer so Vercel keeps the execution context alive while locked
-  await new Promise((resolve) => setTimeout(resolve, restSeconds * 1000));
-
-  const payload = JSON.stringify({
-    title: "Rest Complete!",
-    body: `Your ${restSeconds}s rest is complete. Ready for the next set?`,
-    url: `/workout/${workoutId}`,
-  });
-
-  for (const sub of subscriptions) {
-    try {
-      await webPush.sendNotification(
-        {
-          endpoint: sub.endpoint,
-          keys: { p256dh: sub.p256dh, auth: sub.auth },
-        },
-        payload
-      );
-    } catch (err: any) {
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        await sql`DELETE FROM push_subscriptions WHERE endpoint = ${sub.endpoint}`;
-      }
-    }
-  }
 }
