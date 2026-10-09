@@ -1,4 +1,3 @@
-// app/actions/push.ts
 "use server";
 
 import webPush from "web-push";

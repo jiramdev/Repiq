@@ -1,4 +1,3 @@
-// components/bottom-dock.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -13,7 +12,6 @@ const NAV_ITEMS = [
   { href: "/account", label: "Account", icon: User },
 ];
 
-// Exact base routes where the dock is allowed to display
 const ALLOWED_ROUTES = new Set([
   "/",
   "/schedule",
@@ -59,7 +57,6 @@ export function BottomDock() {
     }
   }, []);
 
-  // Show dock ONLY on dashboard, schedule, statistics, and account
   if (!ALLOWED_ROUTES.has(pathname) || isKeyboardOpen) {
     return null;
   }

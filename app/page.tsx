@@ -11,7 +11,6 @@ import {
   label,
   metric,
   bodyMuted,
-  page,
   s,
 } from "@/components/ui";
 import { MorningWorkoutNotifier } from "./morning-notifier";
@@ -113,7 +112,6 @@ async function DashboardContent() {
 
   return (
     <>
-      {/* Morning Reminder Notifier Hook */}
       {!isDoneToday && (
         <MorningWorkoutNotifier
           enabled={notifyMorning}
@@ -164,14 +162,14 @@ async function DashboardContent() {
 
 export default function DashboardPage() {
   return (
-    <div className={page()}>
-      <main className={`max-w-sm mx-auto ${s.stack}`}>
+    <div className="h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none overflow-hidden pb-24">
+      <main className={`w-full ${s.stack} pt-2`}>
         <Header title="Dashboard" />
 
         <Suspense
           fallback={
             <div className={`${s.stack} animate-pulse`}>
-              <div className={`${todayWidget} opacity-60 h-28`} />
+              <div className={`${todayWidget} opacity-60 h-28`}></div>
               <div className={`grid grid-cols-2 ${s.gap}`}>
                 <div className={`${card} aspect-square opacity-60`} />
                 <div className={`${card} aspect-square opacity-60`} />

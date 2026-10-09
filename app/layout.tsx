@@ -1,4 +1,3 @@
-// app/layout.tsx
 import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { Anton, Inter } from "next/font/google";
@@ -46,9 +45,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${anton.variable} bg-[#baa3d0] overscroll-none`}
+      className={`${inter.variable} ${anton.variable} h-full bg-[#baa3d0] overscroll-none`}
     >
-      <body className="min-h-[100dvh] bg-[#baa3d0] antialiased text-white selection:bg-[#baa3d0] selection:text-[#141416] overscroll-none pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
+      <body className="h-full min-h-[100dvh] bg-[#baa3d0] antialiased text-white selection:bg-[#baa3d0] selection:text-[#141416] overscroll-none">
         {children}
         <Suspense fallback={null}>
           <BottomDock />

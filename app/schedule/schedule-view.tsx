@@ -1,4 +1,3 @@
-// app/schedule/schedule-view.tsx
 "use client";
 
 import { useState, useTransition } from "react";
@@ -57,7 +56,7 @@ export function ScheduleView({
   };
 
   return (
-    <div className="min-h-screen bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
+    <div className="min-h-[100dvh] bg-[#baa3d0] text-white pb-28 pt-4 px-4 select-none">
       <main className="max-w-sm mx-auto space-y-3.5">
         <Header title="Schedule" />
 
@@ -67,12 +66,14 @@ export function ScheduleView({
               const nameClean = item.name ? item.name.trim() : "";
               const isRest = !nameClean || nameClean.toLowerCase() === "rest";
               const hasPlan = !isRest;
-              const currentPlan = planList.find((p) => p.title.toLowerCase() === nameClean.toLowerCase());
+              const currentPlan = planList.find(
+                (p) => p.title.toLowerCase() === nameClean.toLowerCase()
+              );
               const currentValue = isRest
                 ? "rest"
                 : currentPlan
-                  ? String(currentPlan.id)
-                  : "";
+                ? String(currentPlan.id)
+                : "";
 
               return (
                 <div
@@ -113,7 +114,6 @@ export function ScheduleView({
           </div>
         </Section>
 
-        {/* Workout Plans */}
         <Section label="Workout Plans" meta="templates">
           <div className="space-y-2 pt-1">
             {planList.length > 0 ? (

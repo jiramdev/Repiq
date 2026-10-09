@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { sql } from "@/lib/db";
 import { getActiveUserId } from "@/lib/auth";
 import { AccountView, UserProfileData } from "./account-view";
-import { Header, page, s, card } from "@/components/ui";
+import { Header, s, card } from "@/components/ui";
 
 async function AccountContent() {
   await connection();
@@ -50,11 +50,9 @@ async function AccountContent() {
 
   const profile: UserProfileData = (profileResult[0] as UserProfileData) || defaultProfile;
 
-  // Read latest weight recorded
   let latestWeight: number | null =
     weightResult[0]?.value != null ? Number(weightResult[0].value) : null;
 
-  // If user selected lbs but recorded in kg, convert for display
   if (latestWeight != null && profile.unit_system === "lbs") {
     latestWeight = Math.round(latestWeight * 2.20462 * 10) / 10;
   }
@@ -72,8 +70,8 @@ export default function AccountPage() {
   return (
     <Suspense
       fallback={
-        <div className={page()}>
-          <main className={`max-w-sm mx-auto ${s.stack} animate-pulse`}>
+        <div className="h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none overflow-hidden pb-24">
+          <main className={`w-full ${s.stack} pt-2 animate-pulse`}>
             <Header title="Account" />
             <div className={`${card} opacity-60 h-28`} />
             <div className={`${card} opacity-60 h-44`} />

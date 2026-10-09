@@ -1,10 +1,9 @@
-// app/api/push/schedule/route.ts
 import { NextResponse } from "next/server";
 import webPush from "web-push";
 import { sql } from "@/lib/db";
 import { getActiveUserId } from "@/lib/auth";
 
-export const maxDuration = 120; // 2 minutes execution window
+export const maxDuration = 120;
 
 webPush.setVapidDetails(
   process.env.VAPID_SUBJECT || "mailto:support@repiq.app",
@@ -27,7 +26,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, sent: 0 });
     }
 
-    // Delay on server while device is locked
     await new Promise((resolve) => setTimeout(resolve, (restSeconds || 30) * 1000));
 
     const payload = JSON.stringify({

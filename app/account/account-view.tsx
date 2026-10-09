@@ -150,7 +150,7 @@ export function AccountView({
   const cleanUsernameDisplay = profile.username.replace(/^@+/, "");
 
   return (
-    <div className={page()}>
+    <div className="min-h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none pb-28">
       <main className={`max-w-sm mx-auto ${s.stack}`}>
         <Header title="Account" />
 

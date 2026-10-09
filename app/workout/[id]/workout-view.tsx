@@ -1,4 +1,3 @@
-// app/workout/[id]/workout-view.tsx
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
@@ -14,7 +13,6 @@ import {
   numberInput,
   label,
   display,
-  page,
   s,
   t,
   rond,
@@ -102,18 +100,15 @@ export function WorkoutView({
 
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Absolute end timestamp in ms for screen UI
   const [targetEndTimestamp, setTargetEndTimestamp] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
-  // Register Service Worker on mount
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(console.error);
     }
   }, []);
 
-  // Visual countdown timer for screen display
   useEffect(() => {
     if (!targetEndTimestamp) {
       setRemainingSeconds(null);
@@ -192,8 +187,6 @@ export function WorkoutView({
 
         if (permission === "granted") {
           await subscribeToPush();
-
-          // Dispatch background timer to API route
           fetch("/api/push/schedule", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -253,8 +246,8 @@ export function WorkoutView({
   const prevWeight = currentExercise.sets[0]?.last_weight;
 
   return (
-    <div className={page()}>
-      <main className={`max-w-sm mx-auto ${s.stack}`}>
+    <div className="min-h-[100dvh] p-4 flex flex-col justify-between max-w-sm mx-auto select-none overflow-hidden pb-[calc(1.5rem+env(safe-area-inset-bottom,16px))]">
+      <main className={`w-full ${s.stack}`}>
         <Header title={workout.name}>
           <CloseButton onClick={handleDiscard} label="Close" />
         </Header>
@@ -358,34 +351,34 @@ export function WorkoutView({
             })}
           </div>
         </Section>
-
-        <div
-          className={`pt-2 ${
-            !isFirstExercise ? "grid grid-cols-2 gap-2" : ""
-          }`}
-        >
-          {!isFirstExercise && (
-            <Action variant="secondary" type="button" onClick={handleBack}>
-              Back
-            </Action>
-          )}
-
-          {isLastExercise ? (
-            <Action
-              variant="secondary"
-              type="button"
-              disabled={isPending}
-              onClick={handleFinish}
-            >
-              {isPending ? "Saving..." : "Finish Workout"}
-            </Action>
-          ) : (
-            <Action variant="secondary" type="button" onClick={handleNext}>
-              Next
-            </Action>
-          )}
-        </div>
       </main>
+
+      <div
+        className={`pt-4 ${
+          !isFirstExercise ? "grid grid-cols-2 gap-2" : ""
+        }`}
+      >
+        {!isFirstExercise && (
+          <Action variant="secondary" type="button" onClick={handleBack}>
+            Back
+          </Action>
+        )}
+
+        {isLastExercise ? (
+          <Action
+            variant="secondary"
+            type="button"
+            disabled={isPending}
+            onClick={handleFinish}
+          >
+            {isPending ? "Saving..." : "Finish Workout"}
+          </Action>
+        ) : (
+          <Action variant="secondary" type="button" onClick={handleNext}>
+            Next
+          </Action>
+        )}
+      </div>
     </div>
   );
 }

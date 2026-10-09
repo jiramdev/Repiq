@@ -1,4 +1,3 @@
-// app/plans/[id]/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -74,7 +73,6 @@ export async function addExerciseToPlan(
     WHERE exercise_id = ${exerciseId}
   `;
 
-  // Update exercise_count using dynamic count
   await sql`
     UPDATE plans
     SET exercise_count = (

@@ -1,4 +1,3 @@
-// public/sw.js
 self.addEventListener("install", () => {
     self.skipWaiting();
   });
@@ -7,7 +6,6 @@ self.addEventListener("install", () => {
     event.waitUntil(self.clients.claim());
   });
   
-  // 1. Receive background push from server (wakes phone!)
   self.addEventListener("push", (event) => {
     let data = {};
     if (event.data) {
@@ -32,7 +30,6 @@ self.addEventListener("install", () => {
     event.waitUntil(self.registration.showNotification(title, options));
   });
   
-  // 2. Open app when notification clicked
   self.addEventListener("notificationclick", (event) => {
     event.notification.close();
     const urlToOpen = event.notification.data?.url || "/";
