@@ -43,8 +43,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${anton.variable}`}>
-      <body className="min-h-screen bg-[#baa3d0] antialiased text-white selection:bg-[#baa3d0] selection:text-[#141416] pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
+    <html lang="en" className={`${inter.variable} ${anton.variable} bg-[#baa3d0] overscroll-none`}>
+      <body className="min-h-[100dvh] bg-[#baa3d0] antialiased text-white selection:bg-[#baa3d0] selection:text-[#141416] overscroll-none">
         {children}
         <Suspense fallback={null}>
           <BottomDock />

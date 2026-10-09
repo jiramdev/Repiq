@@ -8,7 +8,7 @@ import { LayoutGrid, Calendar, BarChart2, User } from "lucide-react";
 const NAV_ITEMS = [
   { href: "/", label: "Workouts", icon: LayoutGrid },
   { href: "/schedule", label: "Schedule", icon: Calendar },
-  { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/statistics", label: "Statistics", icon: BarChart2 },
   { href: "/account", label: "Account", icon: User },
 ];
 
@@ -30,6 +30,8 @@ export function BottomDock() {
           const isActive =
             href === "/"
               ? pathname === "/" || pathname.startsWith("/workout")
+              : href === "/statistics"
+              ? pathname.startsWith("/statistics") || pathname.startsWith("/analytics")
               : pathname.startsWith(href);
 
           return (
