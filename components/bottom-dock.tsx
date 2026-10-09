@@ -13,16 +13,23 @@ const NAV_ITEMS = [
   { href: "/account", label: "Account", icon: User },
 ];
 
+// Exact base routes where the dock is allowed to display
+const ALLOWED_ROUTES = new Set([
+  "/",
+  "/schedule",
+  "/statistics",
+  "/analytics",
+  "/account",
+]);
+
 export function BottomDock() {
   const pathname = usePathname();
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
   useEffect(() => {
-    // 1. Listen to visualViewport resize (triggers when virtual keyboard opens on iOS/Android)
     if (typeof window !== "undefined" && window.visualViewport) {
       const handleResize = () => {
         if (!window.visualViewport) return;
-        // If the visual viewport height is noticeably smaller than window.innerHeight, keyboard is open
         const isShrunk = window.visualViewport.height < window.innerHeight * 0.82;
         setIsKeyboardOpen(isShrunk);
       };
@@ -32,7 +39,6 @@ export function BottomDock() {
         window.visualViewport?.removeEventListener("resize", handleResize);
       };
     } else {
-      // 2. Fallback for older browsers: track focus on text fields
       const handleFocusIn = (e: FocusEvent) => {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea") {
@@ -53,8 +59,8 @@ export function BottomDock() {
     }
   }, []);
 
-  // Hide the floating dock on authentication screens or when typing
-  if (pathname.startsWith("/auth") || isKeyboardOpen) {
+  // Show dock ONLY on dashboard, schedule, statistics, and account
+  if (!ALLOWED_ROUTES.has(pathname) || isKeyboardOpen) {
     return null;
   }
 
@@ -67,10 +73,10 @@ export function BottomDock() {
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const isActive =
             href === "/"
-              ? pathname === "/" || pathname.startsWith("/workout")
+              ? pathname === "/"
               : href === "/statistics"
-              ? pathname.startsWith("/statistics") || pathname.startsWith("/analytics")
-              : pathname.startsWith(href);
+              ? pathname === "/statistics" || pathname === "/analytics"
+              : pathname === href;
 
           return (
             <Link
