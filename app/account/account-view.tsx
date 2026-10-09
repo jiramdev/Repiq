@@ -47,17 +47,22 @@ export function AccountView({
   stats: AccountStats;
 }) {
   const [isPending, startTransition] = useTransition();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  // Account details form state
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountSuccess, setAccountSuccess] = useState(false);
   const [formData, setFormData] = useState({
     name: profile.name,
     age: profile.age,
     email: profile.email,
     username: profile.username.replace(/^@+/, ""),
   });
+
+  // Password section form state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   const handleNotifyToggle = async (
     key: "notify_workout_reminders" | "notify_rest_day_alerts",
@@ -84,40 +89,76 @@ export function AccountView({
 
   const handleAccountSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setSaveSuccess(false);
+    setAccountError(null);
+    setAccountSuccess(false);
 
     startTransition(async () => {
       const res = await updateAccountDetails({
         ...formData,
-        currentPassword: currentPassword || undefined,
-        newPassword: newPassword || undefined,
       });
 
       if (!res.success && res.error) {
-        setErrorMessage(res.error);
+        setAccountError(res.error);
+        return;
+      }
+
+      setAccountError(null);
+      setAccountSuccess(true);
+      setTimeout(() => setAccountSuccess(false), 2500);
+    });
+  };
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(false);
+
+    if (!currentPassword) {
+      setPasswordError("Please enter your current password.");
+      return;
+    }
+
+    if (!newPassword) {
+      setPasswordError("Please enter a new password.");
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await updateAccountDetails({
+        ...formData,
+        currentPassword,
+        newPassword,
+      });
+
+      if (!res.success && res.error) {
+        setPasswordError(res.error);
         return;
       }
 
       setCurrentPassword("");
       setNewPassword("");
-      setErrorMessage(null);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2500);
+      setPasswordError(null);
+      setPasswordSuccess(true);
+      setTimeout(() => setPasswordSuccess(false), 2500);
     });
   };
 
-  const handleResetForm = () => {
+  const handleResetAccountForm = () => {
     setFormData({
       name: profile.name,
       age: profile.age,
       email: profile.email,
       username: profile.username.replace(/^@+/, ""),
     });
+    setAccountError(null);
+    setAccountSuccess(false);
+  };
+
+  const handleResetPasswordForm = () => {
     setCurrentPassword("");
     setNewPassword("");
-    setErrorMessage(null);
-    setSaveSuccess(false);
+    setPasswordError(null);
+    setPasswordSuccess(false);
   };
 
   const handleResetHistory = () => {
@@ -156,7 +197,6 @@ export function AccountView({
         {/* 2. Account Details */}
         <Section label="Account Details">
           <form onSubmit={handleAccountSubmit} className="space-y-2 pt-1">
-            {/* Name */}
             <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
               <span className={value}>Name</span>
               <input
@@ -164,13 +204,12 @@ export function AccountView({
                 value={formData.name}
                 onChange={(e) => {
                   setFormData({ ...formData, name: e.target.value });
-                  if (errorMessage) setErrorMessage(null);
+                  if (accountError) setAccountError(null);
                 }}
                 className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
               />
             </div>
 
-            {/* Age */}
             <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
               <span className={value}>Age</span>
               <input
@@ -181,13 +220,12 @@ export function AccountView({
                     ...formData,
                     age: parseInt(e.target.value, 10) || 0,
                   });
-                  if (errorMessage) setErrorMessage(null);
+                  if (accountError) setAccountError(null);
                 }}
                 className="bg-transparent text-right font-medium text-white outline-none w-24"
               />
             </div>
 
-            {/* Email */}
             <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
               <span className={value}>Email</span>
               <input
@@ -195,13 +233,12 @@ export function AccountView({
                 value={formData.email}
                 onChange={(e) => {
                   setFormData({ ...formData, email: e.target.value });
-                  if (errorMessage) setErrorMessage(null);
+                  if (accountError) setAccountError(null);
                 }}
                 className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate max-w-[200px]"
               />
             </div>
 
-            {/* Username */}
             <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
               <span className={value}>Username</span>
               <input
@@ -212,53 +249,22 @@ export function AccountView({
                     ...formData,
                     username: e.target.value.replace(/^@+/, "").trim(),
                   });
-                  if (errorMessage) setErrorMessage(null);
+                  if (accountError) setAccountError(null);
                 }}
                 className="bg-transparent text-right font-medium text-white outline-none flex-1 truncate"
               />
             </div>
 
-            {/* Current Password */}
-            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
-              <span className={value}>Current Password</span>
-              <input
-                type="password"
-                placeholder="Current password"
-                value={currentPassword}
-                onChange={(e) => {
-                  setCurrentPassword(e.target.value);
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
-              />
-            </div>
-
-            {/* New Password */}
-            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
-              <span className={value}>New Password</span>
-              <input
-                type="password"
-                placeholder="Leave blank to keep"
-                value={newPassword}
-                onChange={(e) => {
-                  setNewPassword(e.target.value);
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
-              />
-            </div>
-
-            {errorMessage && (
-              <p className={`${errorText} px-1 pt-1`}>{errorMessage}</p>
+            {accountError && (
+              <p className={`${errorText} px-1 pt-1`}>{accountError}</p>
             )}
 
-            {saveSuccess && (
+            {accountSuccess && (
               <p className="text-emerald-400 text-xs font-semibold px-1 pt-1">
                 Account details saved successfully.
               </p>
             )}
 
-            {/* Actions */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               <Action variant="primary" type="submit" disabled={isPending}>
                 {isPending ? "Saving..." : "Save"}
@@ -267,7 +273,7 @@ export function AccountView({
                 variant="secondary"
                 type="button"
                 disabled={isPending}
-                onClick={handleResetForm}
+                onClick={handleResetAccountForm}
               >
                 Cancel
               </Action>
@@ -278,7 +284,6 @@ export function AccountView({
         {/* 3. Notification Preferences */}
         <Section label="Notifications" meta="alerts">
           <div className="space-y-2 pt-1">
-            {/* Morning Workout Reminder */}
             <button
               type="button"
               disabled={isPending}
@@ -302,7 +307,6 @@ export function AccountView({
               </span>
             </button>
 
-            {/* Live Rest Timer Alerts */}
             <button
               type="button"
               disabled={isPending}
@@ -350,7 +354,64 @@ export function AccountView({
           </div>
         </Section>
 
-        {/* 5. Danger Zone */}
+        {/* 5. Password Section (Second to last) */}
+        <Section label="Password" meta="security">
+          <form onSubmit={handlePasswordSubmit} className="space-y-2 pt-1">
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>Current Password</span>
+              <input
+                type="password"
+                placeholder="Current password"
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                  if (passwordError) setPasswordError(null);
+                }}
+                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
+              />
+            </div>
+
+            <div className={`${row} px-5 py-3 flex items-center justify-between gap-3`}>
+              <span className={value}>New Password</span>
+              <input
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  if (passwordError) setPasswordError(null);
+                }}
+                className="bg-transparent text-right font-medium text-white placeholder:text-white/30 outline-none flex-1 truncate"
+              />
+            </div>
+
+            {passwordError && (
+              <p className={`${errorText} px-1 pt-1`}>{passwordError}</p>
+            )}
+
+            {passwordSuccess && (
+              <p className="text-emerald-400 text-xs font-semibold px-1 pt-1">
+                Password changed successfully.
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Action variant="primary" type="submit" disabled={isPending}>
+                {isPending ? "Updating..." : "Update Password"}
+              </Action>
+              <Action
+                variant="secondary"
+                type="button"
+                disabled={isPending}
+                onClick={handleResetPasswordForm}
+              >
+                Cancel
+              </Action>
+            </div>
+          </form>
+        </Section>
+
+        {/* 6. Danger Zone (Last) */}
         <Section label="Data Management" meta="danger">
           <div className="pt-1 flex flex-col gap-2">
             <button
