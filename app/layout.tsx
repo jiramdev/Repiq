@@ -44,7 +44,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${anton.variable}`}>
-      <body className="min-h-screen bg-[#baa3d0] antialiased">
+      <body className="min-h-screen bg-[#baa3d0] antialiased text-white selection:bg-[#baa3d0] selection:text-[#141416] pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
         {children}
         <Suspense fallback={null}>
           <BottomDock />
