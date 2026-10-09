@@ -2,23 +2,37 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sql } from "@/lib/db";
-import { getActiveUserId } from "@/lib/auth";
+import { sql, isUniqueViolation } from "@/lib/db";
+import { requireUserId, destroyOtherSessions } from "@/lib/auth";
+import { hashPassword, validateNewPassword, verifyPassword } from "@/lib/password";
+import {
+  EMAIL_PATTERN,
+  LIMITS,
+  USERNAME_PATTERN,
+  cleanText,
+  normalizeEmail,
+  normalizeUsername,
+  toIntInRange,
+} from "@/lib/validation";
+import { normalizeUnit, type WeightUnit } from "@/lib/units";
+import { str } from "@/lib/strings";
 
-export async function toggleUnitSystem(currentUnit: string) {
-  const userId = await getActiveUserId();
-  const nextUnit = currentUnit === "kg" ? "lbs" : "kg";
+type Result = { success: boolean; error?: string };
 
+function revalidateAll() {
+  revalidatePath("/", "layout");
+}
+
+export async function setUnitSystem(unit: WeightUnit): Promise<Result> {
+  const userId = await requireUserId();
+  const next = normalizeUnit(unit);
   await sql`
-    INSERT INTO user_profiles (user_id, unit_system)
-    VALUES (${userId}, ${nextUnit})
-    ON CONFLICT (user_id) DO UPDATE
-    SET unit_system = ${nextUnit}, updated_at = NOW()
+    UPDATE user_profiles
+    SET unit_system = ${next}, updated_at = now()
+    WHERE user_id = ${userId}
   `;
-
-  revalidatePath("/account", "page");
-  revalidatePath("/", "page");
-  revalidatePath("/statistics", "page");
+  revalidateAll();
+  return { success: true };
 }
 
 export async function updateAccountDetails(formData: {
@@ -26,143 +40,130 @@ export async function updateAccountDetails(formData: {
   age: number;
   email: string;
   username: string;
-  currentPassword?: string;
-  newPassword?: string;
-}): Promise<{ success: boolean; error?: string }> {
-  const userId = await getActiveUserId();
-  const cleanUsername = formData.username.replace(/^@+/, "").trim().toLowerCase();
-  const cleanEmail = formData.email.trim().toLowerCase();
+}): Promise<Result> {
+  const userId = await requireUserId();
+  const name = cleanText(formData?.name, LIMITS.name);
+  const username = normalizeUsername(formData?.username);
+  const email = normalizeEmail(formData?.email);
+  const age = toIntInRange(formData?.age, LIMITS.age.min, LIMITS.age.max);
 
-  if (!cleanUsername) {
-    return { success: false, error: "Username cannot be empty." };
-  }
+  if (!name) return { success: false, error: str.auth.enterNameAndUsername };
+  if (!USERNAME_PATTERN.test(username)) return { success: false, error: str.auth.usernameInvalid };
+  if (!EMAIL_PATTERN.test(email)) return { success: false, error: str.auth.emailInvalid };
+  if (age === null) return { success: false, error: str.auth.ageInvalid };
 
-  if (!cleanEmail) {
-    return { success: false, error: "Email cannot be empty." };
-  }
+  try {
+    const [usernameTaken, emailTaken] = await Promise.all([
+      sql`
+        SELECT 1 FROM user_profiles
+        WHERE lower(trim(username)) = ${username} AND user_id <> ${userId}
+        LIMIT 1
+      `,
+      sql`
+        SELECT 1 FROM user_profiles
+        WHERE lower(trim(email)) = ${email} AND user_id <> ${userId}
+        LIMIT 1
+      `,
+    ]);
+    if (usernameTaken.length > 0) return { success: false, error: str.auth.usernameTaken };
+    if (emailTaken.length > 0) return { success: false, error: str.auth.emailTaken };
 
-  const existingUser = await sql`
-    SELECT user_id 
-    FROM user_profiles 
-    WHERE LOWER(username) = ${cleanUsername} AND user_id != ${userId}
-    LIMIT 1
-  `;
-  if (existingUser.length > 0) {
-    return { success: false, error: "Username is already taken." };
-  }
-
-  const existingMail = await sql`
-    SELECT user_id 
-    FROM user_profiles 
-    WHERE LOWER(email) = ${cleanEmail} AND user_id != ${userId}
-    LIMIT 1
-  `;
-  if (existingMail.length > 0) {
-    return { success: false, error: "Email is already registered." };
-  }
-
-  if (formData.newPassword && formData.newPassword.trim().length > 0) {
-    if (!formData.currentPassword || formData.currentPassword.trim().length === 0) {
-      return { success: false, error: "Please enter your current password." };
+    await sql.transaction([
+      sql`
+        UPDATE user_profiles
+        SET name = ${name}, age = ${age}, email = ${email}, username = ${username}, updated_at = now()
+        WHERE user_id = ${userId}
+      `,
+      sql`UPDATE users SET email = ${email}, name = ${name} WHERE id = ${userId}`,
+    ]);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const constraint = String((err as { constraint?: string }).constraint ?? "");
+      return {
+        success: false,
+        error: constraint.includes("username") ? str.auth.usernameTaken : str.auth.emailTaken,
+      };
     }
-
-    const userRows = await sql`
-      SELECT password_hash
-      FROM user_profiles
-      WHERE user_id = ${userId}
-      LIMIT 1
-    `;
-
-    const storedPassword = userRows[0]?.password_hash ?? "••••••••••••";
-    if (formData.currentPassword !== storedPassword) {
-      return { success: false, error: "Current password does not match." };
-    }
-
-    await sql`
-      INSERT INTO user_profiles (user_id, name, age, email, username, password_hash)
-      VALUES (${userId}, ${formData.name.trim()}, ${formData.age}, ${cleanEmail}, ${cleanUsername}, ${formData.newPassword.trim()})
-      ON CONFLICT (user_id) DO UPDATE
-      SET name = ${formData.name.trim()},
-          age = ${formData.age},
-          email = ${cleanEmail},
-          username = ${cleanUsername},
-          password_hash = ${formData.newPassword.trim()},
-          updated_at = NOW()
-    `;
-  } else {
-    await sql`
-      INSERT INTO user_profiles (user_id, name, age, email, username)
-      VALUES (${userId}, ${formData.name.trim()}, ${formData.age}, ${cleanEmail}, ${cleanUsername})
-      ON CONFLICT (user_id) DO UPDATE
-      SET name = ${formData.name.trim()},
-          age = ${formData.age},
-          email = ${cleanEmail},
-          username = ${cleanUsername},
-          updated_at = NOW()
-    `;
+    console.error("updateAccountDetails error:", err);
+    return { success: false, error: str.common.genericError };
   }
-
-  await sql`
-    UPDATE users 
-    SET email = ${cleanEmail} 
-    WHERE id = ${userId}
-  `.catch(() => {});
 
   revalidatePath("/account", "page");
   return { success: true };
 }
 
-export async function toggleNotification(
+export async function changePassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<Result> {
+  const userId = await requireUserId();
+
+  if (!input?.currentPassword?.trim()) {
+    return { success: false, error: str.account.enterCurrentPassword };
+  }
+  const invalid = validateNewPassword(input?.newPassword ?? "");
+  if (invalid) return { success: false, error: invalid };
+
+  const rows = await sql`
+    SELECT password_hash FROM user_profiles WHERE user_id = ${userId} LIMIT 1
+  `;
+  const { ok } = await verifyPassword(input.currentPassword, rows[0]?.password_hash ?? null);
+  if (!ok) return { success: false, error: str.auth.passwordMismatch };
+
+  const hashed = await hashPassword(input.newPassword);
+  await sql`
+    UPDATE user_profiles
+    SET password_hash = ${hashed}, updated_at = now()
+    WHERE user_id = ${userId}
+  `;
+  await destroyOtherSessions(userId);
+
+  return { success: true };
+}
+
+export async function setNotification(
   key: "notify_workout_reminders" | "notify_rest_day_alerts",
-  currentVal: boolean
-) {
-  const userId = await getActiveUserId();
-  const nextVal = !currentVal;
+  enabled: boolean
+): Promise<Result> {
+  const userId = await requireUserId();
+  const next = Boolean(enabled);
 
   if (key === "notify_workout_reminders") {
     await sql`
-      INSERT INTO user_profiles (user_id, notify_workout_reminders)
-      VALUES (${userId}, ${nextVal})
-      ON CONFLICT (user_id) DO UPDATE
-      SET notify_workout_reminders = ${nextVal}, updated_at = NOW()
+      UPDATE user_profiles
+      SET notify_workout_reminders = ${next}, updated_at = now()
+      WHERE user_id = ${userId}
+    `;
+  } else if (key === "notify_rest_day_alerts") {
+    await sql`
+      UPDATE user_profiles
+      SET notify_rest_day_alerts = ${next}, updated_at = now()
+      WHERE user_id = ${userId}
     `;
   } else {
-    await sql`
-      INSERT INTO user_profiles (user_id, notify_rest_day_alerts)
-      VALUES (${userId}, ${nextVal})
-      ON CONFLICT (user_id) DO UPDATE
-      SET notify_rest_day_alerts = ${nextVal}, updated_at = NOW()
-    `;
+    return { success: false, error: str.common.genericError };
   }
 
-  revalidatePath("/account", "page");
-  revalidatePath("/workout/[id]", "page");
-  revalidatePath("/", "page");
+  revalidateAll();
+  return { success: true };
 }
 
-export async function resetWorkoutHistory() {
-  const userId = await getActiveUserId();
+export async function resetWorkoutHistory(): Promise<Result> {
+  const userId = await requireUserId();
 
-  await sql`
-    DELETE FROM completed_sessions
-    WHERE user_id = ${userId}
-  `;
+  await sql.transaction([
+    sql`DELETE FROM completed_sessions WHERE user_id = ${userId}`,
+    // Deleting sessions cascades to their logged sets.
+    sql`DELETE FROM workout_sessions WHERE user_id = ${userId}`,
+    // Pre-migration logs that never got a session.
+    sql`
+      DELETE FROM workout_logs
+      WHERE session_id IS NULL
+        AND workout_id IN (SELECT id FROM workouts WHERE user_id = ${userId})
+    `,
+    sql`UPDATE workouts SET completed = false WHERE user_id = ${userId}`,
+  ]);
 
-  await sql`
-    DELETE FROM workout_logs
-    WHERE workout_id IN (
-      SELECT id FROM workouts WHERE user_id = ${userId}
-    )
-  `;
-
-  await sql`
-    UPDATE workouts
-    SET completed = false
-    WHERE user_id = ${userId}
-  `;
-
-  revalidatePath("/", "page");
-  revalidatePath("/statistics", "page");
-  revalidatePath("/schedule", "page");
-  revalidatePath("/account", "page");
+  revalidateAll();
+  return { success: true };
 }
