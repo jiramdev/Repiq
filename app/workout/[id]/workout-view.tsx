@@ -43,7 +43,6 @@ export function WorkoutView({
     }))
   );
 
-  // Synchronize state if props update
   useEffect(() => {
     setLogs(
       initialLogs.map((l) => ({
@@ -56,18 +55,16 @@ export function WorkoutView({
 
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Absolute end timestamp in ms
+  // Absolute end timestamp in ms for on-screen UI
   const [targetEndTimestamp, setTargetEndTimestamp] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
-  const hasNotifiedRef = useRef(false);
 
-  // Silent audio keep-alive reference to prevent mobile thread suspension
+  // Silent audio keep-alive
   const keepAliveAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const startKeepAlive = () => {
     try {
       if (!keepAliveAudioRef.current) {
-        // Inaudible 1-second stereo PCM WAV loop
         keepAliveAudioRef.current = new Audio(
           "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA=="
         );
@@ -86,7 +83,6 @@ export function WorkoutView({
     } catch {}
   };
 
-  // Register Service Worker on mount & cleanup audio on unmount
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -94,10 +90,13 @@ export function WorkoutView({
 
     return () => {
       stopKeepAlive();
+      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: "CANCEL_REST_TIMER" });
+      }
     };
   }, []);
 
-  // Timer loop driven by epoch timestamp
+  // UI display counter (runs while screen is on)
   useEffect(() => {
     if (!targetEndTimestamp) {
       setRemainingSeconds(null);
@@ -111,10 +110,6 @@ export function WorkoutView({
       setRemainingSeconds(diff);
 
       if (diff <= 0) {
-        if (!hasNotifiedRef.current) {
-          hasNotifiedRef.current = true;
-          triggerRestNotification();
-        }
         setTargetEndTimestamp(null);
         stopKeepAlive();
       }
@@ -125,27 +120,6 @@ export function WorkoutView({
 
     return () => clearInterval(interval);
   }, [targetEndTimestamp]);
-
-  const triggerRestNotification = async () => {
-    if (!allowRestNotification) return;
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
-
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification("Rest complete!", {
-        body: "Time for your next set. Tap to resume workout.",
-        icon: "/icon.png",
-        badge: "/icon.png",
-        tag: "repiq-rest-timer",
-        data: { url: `/workout/${workout.id}` },
-      });
-    } catch {
-      new Notification("Rest complete!", {
-        body: "Time for your next set.",
-      });
-    }
-  };
 
   const exerciseNames = Array.from(new Set(logs.map((l) => l.exercise_name)));
   const exercises = exerciseNames.map((name) => ({
@@ -189,16 +163,34 @@ export function WorkoutView({
         }
       }
 
-      hasNotifiedRef.current = false;
       const duration = restSeconds || 90;
       setTargetEndTimestamp(Date.now() + duration * 1000);
-
-      // Start the audio keep-alive loop so mobile keeps timer process awake
       startKeepAlive();
+
+      // Hand off the timer to the Service Worker so it fires in background/lock screen
+      if (
+        allowRestNotification &&
+        typeof window !== "undefined" &&
+        "serviceWorker" in navigator
+      ) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.active?.postMessage({
+            type: "SCHEDULE_REST_TIMER",
+            restSeconds: duration,
+            workoutId: workout.id,
+          });
+        });
+      }
     } else {
-      // If set is unchecked, stop timer and audio
+      // Unchecked: stop the countdown and tell the service worker to cancel
       setTargetEndTimestamp(null);
       stopKeepAlive();
+
+      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
+        });
+      }
     }
 
     startTransition(async () => {
@@ -226,6 +218,12 @@ export function WorkoutView({
 
   const handleFinish = () => {
     stopKeepAlive();
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
+      });
+    }
+
     startTransition(async () => {
       await completeWorkout(workout.id);
       window.location.href = "/";
@@ -237,9 +235,14 @@ export function WorkoutView({
       stopKeepAlive();
       setTargetEndTimestamp(null);
       setRemainingSeconds(null);
-      hasNotifiedRef.current = true;
       setLogs([]);
       setCurrentStep(0);
+
+      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.active?.postMessage({ type: "CANCEL_REST_TIMER" });
+        });
+      }
 
       startTransition(async () => {
         await discardWorkout(workout.id);
