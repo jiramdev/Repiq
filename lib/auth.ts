@@ -1,33 +1,39 @@
 // lib/auth.ts
+import { cookies } from "next/headers";
 import { sql } from "@/lib/db";
 
-/**
- * Returns the active user ID.
- * If you have a session/cookie auth system, resolve it here.
- * Defaults to the unified profile entry in the database.
- */
-export async function getActiveUserId(): Promise<string> {
-  const profileRow = await sql`
-    SELECT user_id 
-    FROM user_profiles 
-    ORDER BY updated_at DESC 
-    LIMIT 1
-  `;
+const SESSION_COOKIE = "repiq_session_user_id";
 
-  if (profileRow.length > 0 && profileRow[0].user_id) {
-    return profileRow[0].user_id as string;
+export async function getActiveUserId(): Promise<number> {
+  const cookieStore = await cookies();
+  const rawId = cookieStore.get(SESSION_COOKIE)?.value;
+
+  if (rawId) {
+    const id = parseInt(rawId, 10);
+    if (!isNaN(id)) return id;
   }
 
-  // Fallback to core users table if user_profiles is not yet populated
-  const userRow = await sql`
-    SELECT id::text AS user_id 
-    FROM users 
-    LIMIT 1
-  `.catch(() => []);
-
-  if (userRow.length > 0 && userRow[0].user_id) {
-    return userRow[0].user_id as string;
+  // Fallback to default user if no cookie exists
+  const defaultUser = await sql`SELECT id FROM users ORDER BY id ASC LIMIT 1`;
+  if (defaultUser.length > 0) {
+    return defaultUser[0].id as number;
   }
 
-  return "user_demo_1";
+  return 1;
+}
+
+export async function setSessionUser(userId: number) {
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE, String(userId), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365, // 1 year
+  });
+}
+
+export async function clearSessionUser() {
+  const cookieStore = await cookies();
+  cookieStore.delete(SESSION_COOKIE);
 }

@@ -25,6 +25,7 @@ import {
   toggleNotification,
   resetWorkoutHistory,
 } from "./actions";
+import { logoutUser } from "@/app/auth/actions";
 
 export interface UserProfileData {
   name: string;
@@ -75,7 +76,6 @@ export function AccountView({
   ) => {
     const nextVal = !currentVal;
 
-    // Ask browser permission when turning ON
     if (nextVal && typeof window !== "undefined" && "Notification" in window) {
       if (Notification.permission === "default") {
         const permission = await Notification.requestPermission();
@@ -126,6 +126,12 @@ export function AccountView({
         await resetWorkoutHistory();
       });
     }
+  };
+
+  const handleLogout = () => {
+    startTransition(async () => {
+      await logoutUser();
+    });
   };
 
   const closeForm = () => {
@@ -408,7 +414,7 @@ export function AccountView({
 
         {/* 6. Danger Zone */}
         <Section label="Data Management" meta="danger">
-          <div className="pt-1">
+          <div className="pt-1 flex flex-col gap-2">
             <button
               type="button"
               disabled={isPending}
@@ -416,6 +422,15 @@ export function AccountView({
               className="w-full py-3.5 px-4 rounded-full font-bold bg-[#baa3d0] text-[#141416] transition apple-press disabled:opacity-50 text-center text-sm shadow-sm font-editorial tracking-wider uppercase leading-none"
             >
               Reset Workout History
+            </button>
+
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={handleLogout}
+              className="w-full py-3.5 px-4 rounded-full font-semibold border border-white/[0.08] text-[#71717a] hover:text-white transition apple-press disabled:opacity-50 text-center text-sm font-editorial tracking-wider uppercase leading-none"
+            >
+              Uitloggen
             </button>
           </div>
         </Section>
