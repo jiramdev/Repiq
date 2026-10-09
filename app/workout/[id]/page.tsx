@@ -6,6 +6,9 @@ import { sql } from "@/lib/db";
 import { getActiveUserId } from "@/lib/auth";
 import { WorkoutView } from "./workout-view";
 
+// Remove: export const dynamic = "force-dynamic";
+// Remove: export const revalidate = 0;
+
 export interface WorkoutDetail {
   id: number;
   name: string;
@@ -38,6 +41,7 @@ async function WorkoutLoader({
 }: {
   paramsPromise: Promise<{ id: string }>;
 }) {
+  // connection() guarantees this route is treated as dynamic at request time
   await connection();
   const { id } = await paramsPromise;
   const workoutId = parseInt(id, 10);

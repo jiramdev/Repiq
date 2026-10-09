@@ -39,7 +39,6 @@ export async function updateLogSet(
 export async function completeWorkout(workoutId: number) {
   const userId = await getActiveUserId();
 
-  // 1. Fetch the workout name to satisfy the NOT NULL constraint on plan_name
   const workoutRows = await sql`
     SELECT name 
     FROM workouts 
@@ -49,14 +48,12 @@ export async function completeWorkout(workoutId: number) {
 
   const planName = workoutRows[0]?.name || "Workout";
 
-  // 2. Mark workout completed
   await sql`
     UPDATE workouts
     SET completed = true
     WHERE id = ${workoutId} AND user_id = ${userId}
   `;
 
-  // 3. Insert into completed_sessions with plan_name supplied
   await sql`
     INSERT INTO completed_sessions (user_id, workout_id, plan_name, completed_date)
     VALUES (${userId}, ${workoutId}, ${planName}, CURRENT_DATE)
@@ -67,21 +64,27 @@ export async function completeWorkout(workoutId: number) {
   revalidatePath("/statistics", "page");
   revalidatePath("/schedule", "page");
   revalidatePath("/account", "page");
+  revalidatePath(`/workout/${workoutId}`, "page");
 }
 
 export async function discardWorkout(workoutId: number) {
   const userId = await getActiveUserId();
 
+  // 1. Wipe all logged sets for this workout
   await sql`
     DELETE FROM workout_logs
     WHERE workout_id = ${workoutId}
   `;
 
+  // 2. Mark workout as incomplete
   await sql`
     UPDATE workouts
     SET completed = false
     WHERE id = ${workoutId} AND user_id = ${userId}
   `;
 
+  // 3. Purge Next.js route caches
+  revalidatePath(`/workout/${workoutId}`, "page");
   revalidatePath("/", "page");
+  revalidatePath("/schedule", "page");
 }

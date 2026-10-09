@@ -43,21 +43,30 @@ export function WorkoutView({
     }))
   );
 
+  // Sync state if initialLogs change (e.g. after revalidation)
+  useEffect(() => {
+    setLogs(
+      initialLogs.map((l) => ({
+        ...l,
+        actual_weight: l.completed ? l.actual_weight : (l.actual_weight ?? null),
+        actual_reps: l.completed ? l.actual_reps : null,
+      }))
+    );
+  }, [initialLogs]);
+
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Absolute end timestamp in ms (keeps running accurately when user leaves app/tab)
+  // Absolute end timestamp in ms
   const [targetEndTimestamp, setTargetEndTimestamp] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const hasNotifiedRef = useRef(false);
 
-  // Register Service Worker on mount
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
   }, []);
 
-  // Timer loop driven by epoch difference
   useEffect(() => {
     if (!targetEndTimestamp) {
       setRemainingSeconds(null);
@@ -85,7 +94,6 @@ export function WorkoutView({
   }, [targetEndTimestamp]);
 
   const triggerRestNotification = async () => {
-    // Only fire if enabled in Account settings
     if (!allowRestNotification) return;
     if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
@@ -179,15 +187,23 @@ export function WorkoutView({
   const handleFinish = () => {
     startTransition(async () => {
       await completeWorkout(workout.id);
-      router.push("/");
+      window.location.href = "/";
     });
   };
 
   const handleDiscard = () => {
     if (confirm("Discard this workout session?")) {
+      // 1. Immediately wipe all local client states
+      setTargetEndTimestamp(null);
+      setRemainingSeconds(null);
+      hasNotifiedRef.current = true;
+      setLogs([]);
+      setCurrentStep(0);
+
+      // 2. Perform server cleanup, then hard navigate to guarantee stale cache bust
       startTransition(async () => {
         await discardWorkout(workout.id);
-        router.push("/");
+        window.location.href = "/";
       });
     }
   };

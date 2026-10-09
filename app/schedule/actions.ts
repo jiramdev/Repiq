@@ -5,76 +5,94 @@ import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
 import { getActiveUserId } from "@/lib/auth";
 
-export async function assignPlanToWorkout(
-  dayLabel: string,
-  planValue: string,
-  workoutId?: number | null
-) {
-  const userId = await getActiveUserId();
-  const isRest = planValue === "rest";
-  let planTitle = "Rest";
-  let count = 0;
-
-  if (!isRest) {
-    const planId = parseInt(planValue, 10);
-    if (!isNaN(planId)) {
-      const planRows = await sql`
-        SELECT title, exercise_count
-        FROM plans
-        WHERE id = ${planId} AND user_id = ${userId}
-        LIMIT 1
-      `;
-      if (planRows.length > 0) {
-        planTitle = planRows[0].title;
-        count = planRows[0].exercise_count;
-      }
-    }
-  }
-
-  if (workoutId) {
-    await sql`
-      UPDATE workouts
-      SET name = ${planTitle},
-          exercise_count = ${count}
-      WHERE id = ${workoutId} AND user_id = ${userId}
-    `;
-  } else {
-    const existing = await sql`
-      SELECT id FROM workouts
-      WHERE user_id = ${userId} AND day_label = ${dayLabel}
-      LIMIT 1
-    `;
-
-    if (existing.length > 0) {
-      await sql`
-        UPDATE workouts
-        SET name = ${planTitle},
-            exercise_count = ${count}
-        WHERE id = ${existing[0].id} AND user_id = ${userId}
-      `;
-    } else {
-      await sql`
-        INSERT INTO workouts (user_id, name, day_label, scheduled_date, exercise_count, completed)
-        VALUES (${userId}, ${planTitle}, ${dayLabel}, CURRENT_DATE, ${count}, false)
-      `;
-    }
-  }
-
-  revalidatePath("/schedule", "page");
-  revalidatePath("/", "page");
-}
-
 export async function createPlan(title: string) {
-  const cleanTitle = title.trim();
-  if (!cleanTitle) return;
-
   const userId = await getActiveUserId();
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return null;
 
-  await sql`
+  const result = await sql`
     INSERT INTO plans (user_id, title, exercise_count)
     VALUES (${userId}, ${cleanTitle}, 0)
+    RETURNING id
   `;
 
   revalidatePath("/schedule", "page");
   revalidatePath("/", "page");
+  return result[0]?.id as number;
+}
+
+export async function assignPlanToWorkout(
+  dayLabel: string,
+  planId?: number | string | null,
+  customName?: number | string | null
+) {
+  const userId = await getActiveUserId();
+
+  const workoutRows = await sql`
+    SELECT id FROM workouts
+    WHERE user_id = ${userId} AND day_label = ${dayLabel}
+    LIMIT 1
+  `;
+
+  let workoutId = workoutRows[0]?.id;
+
+  const planIdNum =
+    planId !== null && planId !== undefined && planId !== "rest"
+      ? typeof planId === "number"
+        ? planId
+        : parseInt(String(planId), 10)
+      : null;
+
+  const resolvedCustomName =
+    customName !== null && customName !== undefined
+      ? String(customName).trim()
+      : null;
+
+  if (planIdNum !== null && !isNaN(planIdNum)) {
+    const planRows = await sql`
+      SELECT title, exercise_count FROM plans
+      WHERE id = ${planIdNum} AND user_id = ${userId}
+      LIMIT 1
+    `;
+    const plan = planRows[0];
+    const planName = resolvedCustomName || plan?.title || "Workout";
+    const count = plan?.exercise_count || 0;
+
+    if (workoutId) {
+      await sql`
+        DELETE FROM workout_logs
+        WHERE workout_id = ${workoutId}
+      `;
+
+      await sql`
+        UPDATE workouts
+        SET name = ${planName},
+            exercise_count = ${count},
+            completed = false
+        WHERE id = ${workoutId} AND user_id = ${userId}
+      `;
+    }
+  } else {
+    const fallbackName = resolvedCustomName || "Rest";
+    if (workoutId) {
+      await sql`
+        DELETE FROM workout_logs
+        WHERE workout_id = ${workoutId}
+      `;
+
+      await sql`
+        UPDATE workouts
+        SET name = ${fallbackName},
+            exercise_count = 0,
+            completed = false
+        WHERE id = ${workoutId} AND user_id = ${userId}
+      `;
+    }
+  }
+
+  revalidatePath("/schedule", "page");
+  revalidatePath("/", "page");
+  if (workoutId) {
+    revalidatePath(`/workout/${workoutId}`, "page");
+  }
 }
