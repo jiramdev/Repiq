@@ -1,3 +1,4 @@
+// app/layout.tsx
 import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { Anton, Inter } from "next/font/google";
@@ -21,6 +22,11 @@ export const metadata: Metadata = {
   title: "repiq",
   description: "Minimalist workout tracker",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
