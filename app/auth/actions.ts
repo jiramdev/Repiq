@@ -6,6 +6,30 @@ import { setSessionUser, clearSessionUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+export async function checkUsernameAvailable(
+  rawUsername: string
+): Promise<{ available: boolean; error?: string }> {
+  const username = rawUsername.replace(/^@+/, "").trim().toLowerCase();
+  if (!username) {
+    return { available: false, error: "Please enter a username." };
+  }
+  if (username.length < 3) {
+    return { available: false, error: "Username must be at least 3 characters." };
+  }
+
+  const existing = await sql`
+    SELECT user_id FROM user_profiles 
+    WHERE LOWER(username) = ${username} 
+    LIMIT 1
+  `;
+
+  if (existing.length > 0) {
+    return { available: false, error: "Username is already taken." };
+  }
+
+  return { available: true };
+}
+
 export async function loginUser(formData: {
   identifier: string;
   password: string;

@@ -13,7 +13,7 @@ import {
   value,
   hint,
 } from "@/components/ui";
-import { loginUser, registerAndOnboard } from "./actions";
+import { loginUser, registerAndOnboard, checkUsernameAvailable } from "./actions";
 
 export default function AuthPage() {
   const [isPending, startTransition] = useTransition();
@@ -29,8 +29,8 @@ export default function AuthPage() {
     email: "",
     password: "",
     age: 24,
-    notify_workout_reminders: true,
-    notify_rest_day_alerts: true,
+    notify_workout_reminders: false,
+    notify_rest_day_alerts: false,
   });
 
   const handleLogin = (e: React.FormEvent) => {
@@ -52,6 +52,17 @@ export default function AuthPage() {
     });
   };
 
+  const handleUsernameBlur = async () => {
+    const raw = formData.username.trim();
+    if (!raw) return;
+    const res = await checkUsernameAvailable(raw);
+    if (!res.available) {
+      setErrorMessage(res.error || "Username is already taken.");
+    } else {
+      setErrorMessage(null);
+    }
+  };
+
   const handleToggleNotification = async (
     field: "notify_workout_reminders" | "notify_rest_day_alerts"
   ) => {
@@ -64,6 +75,36 @@ export default function AuthPage() {
     }
 
     setFormData((prev) => ({ ...prev, [field]: nextVal }));
+  };
+
+  const handleContinue = async () => {
+    setErrorMessage(null);
+
+    if (step === 1) {
+      if (!formData.email || !formData.password) {
+        setErrorMessage("Please enter both email and password.");
+        return;
+      }
+      setStep(2);
+      return;
+    }
+
+    if (step === 2) {
+      if (!formData.name || !formData.username) {
+        setErrorMessage("Please enter your name and username.");
+        return;
+      }
+
+      // Check username availability right now before moving to Step 3
+      startTransition(async () => {
+        const check = await checkUsernameAvailable(formData.username);
+        if (!check.available) {
+          setErrorMessage(check.error || "Username is already taken.");
+          return;
+        }
+        setStep(3);
+      });
+    }
   };
 
   const handleFinishOnboarding = () => {
@@ -206,9 +247,11 @@ export default function AuthPage() {
                         required
                         placeholder="alexm"
                         value={formData.username}
-                        onChange={(e) =>
-                          setFormData({ ...formData, username: e.target.value })
-                        }
+                        onBlur={handleUsernameBlur}
+                        onChange={(e) => {
+                          setFormData({ ...formData, username: e.target.value });
+                          if (errorMessage) setErrorMessage(null);
+                        }}
                         className={input}
                       />
                     </div>
@@ -296,20 +339,10 @@ export default function AuthPage() {
                   <Action
                     variant="primary"
                     type="button"
-                    onClick={() => {
-                      if (step === 1 && (!formData.email || !formData.password)) {
-                        setErrorMessage("Please enter both email and password.");
-                        return;
-                      }
-                      if (step === 2 && (!formData.name || !formData.username)) {
-                        setErrorMessage("Please enter your name and username.");
-                        return;
-                      }
-                      setErrorMessage(null);
-                      setStep((prev) => (prev + 1) as 2 | 3);
-                    }}
+                    disabled={isPending}
+                    onClick={handleContinue}
                   >
-                    Continue
+                    {isPending && step === 2 ? "Checking..." : "Continue"}
                   </Action>
                 ) : (
                   <Action
@@ -326,7 +359,7 @@ export default function AuthPage() {
           )}
         </div>
 
-        {/* Separate Switch Button Under the Card */}
+        {/* Separate Switch Button Under the Card (Hidden during Onboarding Steps 2 & 3) */}
         {mode === "login" ? (
           <Action
             variant="secondary"
@@ -339,7 +372,7 @@ export default function AuthPage() {
           >
             Create Account
           </Action>
-        ) : (
+        ) : step === 1 ? (
           <Action
             variant="secondary"
             type="button"
@@ -350,7 +383,7 @@ export default function AuthPage() {
           >
             Back to Sign In
           </Action>
-        )}
+        ) : null}
       </div>
     </div>
   );
