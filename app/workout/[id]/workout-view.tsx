@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { Play, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui";
 import { str } from "@/lib/strings";
 import type { WeightUnit } from "@/lib/units";
+import { durationInputValue, formatDuration, parseDuration } from "@/lib/exercise-types";
 import { useSetSaver, type SaveStatus } from "@/lib/client/use-set-saver";
 import { useRestTimer } from "@/lib/client/use-rest-timer";
 import { useWakeLock } from "@/lib/client/use-wake-lock";
@@ -35,7 +37,12 @@ import { LoadingScreen } from "@/components/loading-screen";
 import type { WorkoutDetail, WorkoutLog } from "./types";
 import { completeWorkout, discardWorkout } from "./actions";
 
-type Draft = { weight?: string; reps?: string };
+type Draft = { weight?: string; reps?: string; time?: string };
+
+type Hold = { logId: number; startedAt: number };
+
+/** Wall clock for the hold timer (only read in event handlers and intervals). */
+const clock = () => Date.now();
 
 function parseDecimal(raw: string): number | null | undefined {
   const cleaned = raw.replace(",", ".").trim();
@@ -155,6 +162,7 @@ export function WorkoutView({
             ...l,
             ...("actual_weight" in p ? { actual_weight: p.actual_weight ?? null } : {}),
             ...("actual_reps" in p ? { actual_reps: p.actual_reps ?? null } : {}),
+            ...("duration_seconds" in p ? { duration_seconds: p.duration_seconds ?? null } : {}),
             ...("completed" in p ? { completed: Boolean(p.completed) } : {}),
           };
         })
@@ -190,16 +198,45 @@ export function WorkoutView({
     saver.queue(log.id, { actual_reps: parsed });
   };
 
-  const handleToggleComplete = async (log: WorkoutLog) => {
-    const nextVal = !log.completed;
-    setLogs((prev) => prev.map((l) => (l.id === log.id ? { ...l, completed: nextVal } : l)));
-    saver.queue(log.id, { completed: nextVal }, true);
+  const handleDuration = (log: WorkoutLog, raw: string) => {
+    setDrafts((d) => ({ ...d, [log.id]: { ...d[log.id], time: raw } }));
+    const parsed = parseDuration(raw);
+    if (parsed === undefined) return;
+    setLogs((prev) => prev.map((l) => (l.id === log.id ? { ...l, duration_seconds: parsed } : l)));
+    saver.queue(log.id, { duration_seconds: parsed });
+  };
 
-    if (!nextVal) {
-      timer.stop();
-      return;
-    }
+  // Hold timer for static exercises: start/stop fills in the set's time.
+  const [hold, setHold] = useState<Hold | null>(null);
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    if (!hold) return;
+    const id = window.setInterval(() => setNow(clock()), 250);
+    return () => window.clearInterval(id);
+  }, [hold]);
+  const holdSeconds = hold ? Math.max(0, Math.floor((now - hold.startedAt) / 1000)) : 0;
 
+  const startHold = (log: WorkoutLog) => {
+    timer.stop();
+    const startedAt = clock();
+    setNow(startedAt);
+    setHold({ logId: log.id, startedAt });
+  };
+
+  const stopHold = (log: WorkoutLog) => {
+    if (!hold || hold.logId !== log.id) return;
+    const secs = Math.max(0, Math.round((clock() - hold.startedAt) / 1000));
+    setHold(null);
+    setDrafts((d) => ({ ...d, [log.id]: { ...d[log.id], time: undefined } }));
+    setLogs((prev) =>
+      prev.map((l) => (l.id === log.id ? { ...l, duration_seconds: secs, completed: true } : l))
+    );
+    // A finished hold is a finished set: save it and start the rest.
+    saver.queue(log.id, { duration_seconds: secs, completed: true }, true);
+    void startRest(log);
+  };
+
+  const startRest = async (log: WorkoutLog) => {
     timer.start(log.rest_seconds || 90);
 
     if (allowRestNotification && !pushReady.current && "Notification" in window) {
@@ -209,6 +246,19 @@ export function WorkoutView({
         pushReady.current = await ensurePushSubscription();
       }
     }
+  };
+
+  const handleToggleComplete = async (log: WorkoutLog) => {
+    const nextVal = !log.completed;
+    if (hold?.logId === log.id) setHold(null);
+    setLogs((prev) => prev.map((l) => (l.id === log.id ? { ...l, completed: nextVal } : l)));
+    saver.queue(log.id, { completed: nextVal }, true);
+
+    if (!nextVal) {
+      timer.stop();
+      return;
+    }
+    await startRest(log);
   };
 
   const handleFinish = () => {
@@ -292,7 +342,22 @@ export function WorkoutView({
     );
   }
 
+  const type = currentExercise.sets[0]?.exercise_type ?? "weighted";
   const prevWeight = currentExercise.sets.find((x) => x.last_weight != null)?.last_weight;
+  const prevReps = currentExercise.sets.find((x) => x.last_reps != null)?.last_reps;
+  const prevSeconds = currentExercise.sets.find((x) => x.last_seconds != null)?.last_seconds;
+  const prevText =
+    type === "static"
+      ? prevSeconds != null
+        ? str.workout.prev(formatDuration(prevSeconds))
+        : null
+      : type === "bodyweight"
+        ? prevReps != null
+          ? str.workout.prevReps(prevReps)
+          : null
+        : prevWeight != null
+          ? str.workout.prev(`${prevWeight} ${unit}`)
+          : null;
 
   return (
     <div className="min-h-[100dvh] p-4 flex flex-col justify-between max-w-sm mx-auto select-none pb-[calc(1.5rem+env(safe-area-inset-bottom,16px))]">
@@ -339,15 +404,21 @@ export function WorkoutView({
         <Section
           label={<span className={display}>{currentExercise.name}</span>}
           meta={
-            prevWeight != null
-              ? `${str.workout.prev(`${prevWeight} ${unit}`)} · ${str.workout.progress(step + 1, exercises.length)}`
+            prevText
+              ? `${prevText} · ${str.workout.progress(step + 1, exercises.length)}`
               : str.workout.progress(step + 1, exercises.length)
           }
         >
           <div className="grid grid-cols-12 gap-2 text-center items-center px-2 pt-1">
             <span className={`${label} col-span-2 text-left`}>{str.workout.set}</span>
-            <span className={`${label} col-span-4`}>{unit}</span>
-            <span className={`${label} col-span-4`}>{str.workout.reps}</span>
+            {type === "weighted" && (
+              <>
+                <span className={`${label} col-span-4`}>{unit}</span>
+                <span className={`${label} col-span-4`}>{str.workout.reps}</span>
+              </>
+            )}
+            {type === "bodyweight" && <span className={`${label} col-span-8`}>{str.workout.reps}</span>}
+            {type === "static" && <span className={`${label} col-span-8`}>{str.workout.time}</span>}
             <span className={`${label} col-span-2 text-right`}>{str.workout.done}</span>
           </div>
 
@@ -358,6 +429,17 @@ export function WorkoutView({
                 draft.weight ?? (set.actual_weight != null ? String(set.actual_weight) : "");
               const repsValue =
                 draft.reps ?? (set.actual_reps != null ? String(set.actual_reps) : "");
+              const holding = hold?.logId === set.id;
+              const timeValue = holding
+                ? durationInputValue(holdSeconds)
+                : (draft.time ??
+                  (set.duration_seconds != null ? durationInputValue(set.duration_seconds) : ""));
+              const timePlaceholder =
+                set.last_seconds != null
+                  ? durationInputValue(set.last_seconds)
+                  : set.target_seconds != null
+                    ? durationInputValue(set.target_seconds)
+                    : "—";
 
               return (
                 <div
@@ -368,6 +450,7 @@ export function WorkoutView({
                     {set.set_number}
                   </span>
 
+                  {type === "weighted" && (
                   <div className="col-span-4">
                     <input
                       type="text"
@@ -381,8 +464,10 @@ export function WorkoutView({
                       className={`${numberInput} text-white placeholder:text-[#71717a] focus:placeholder:text-transparent`}
                     />
                   </div>
+                  )}
 
-                  <div className="col-span-4">
+                  {type !== "static" && (
+                  <div className={type === "weighted" ? "col-span-4" : "col-span-8"}>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -396,6 +481,42 @@ export function WorkoutView({
                       className={`${numberInput} text-white placeholder:text-[#71717a] focus:placeholder:text-transparent`}
                     />
                   </div>
+                  )}
+
+                  {type === "static" && (
+                    <div className="col-span-8 flex items-center gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        enterKeyHint="done"
+                        aria-label={str.workout.timeFor(set.set_number)}
+                        placeholder={timePlaceholder}
+                        value={timeValue}
+                        readOnly={holding}
+                        onChange={(e) => handleDuration(set, e.target.value)}
+                        className={`${numberInput} tabular-nums text-white placeholder:text-[#71717a] focus:placeholder:text-transparent`}
+                      />
+                      <button
+                        type="button"
+                        aria-pressed={holding}
+                        aria-label={holding ? str.workout.holdStop(set.set_number) : str.workout.holdStart(set.set_number)}
+                        disabled={hold !== null && !holding}
+                        onClick={() => (holding ? stopHold(set) : startHold(set))}
+                        className={`w-11 h-11 shrink-0 ${rond} flex items-center justify-center border transition apple-press disabled:opacity-30 ${
+                          holding
+                            ? "bg-white border-white text-[#141416]"
+                            : "border-white/[0.08] bg-[#141416] text-[#baa3d0]"
+                        }`}
+                      >
+                        {holding ? (
+                          <Square className={`${t.hint} fill-current`} />
+                        ) : (
+                          <Play className={`${t.hint} fill-current`} />
+                        )}
+                      </button>
+                    </div>
+                  )}
 
                   <div className="col-span-2 flex justify-end">
                     <button
