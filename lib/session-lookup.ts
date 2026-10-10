@@ -29,7 +29,8 @@ export async function lookupSession(token: string, now: Date = new Date()): Prom
             EXISTS (
               SELECT 1 FROM workout_logs l
               WHERE l.session_id = ws.id
-                AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL OR l.duration_seconds IS NOT NULL)
+                -- to_jsonb: still works when migration 0009 (duration_seconds) hasn't run.
+                AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL OR to_jsonb(l) ->> 'duration_seconds' IS NOT NULL)
             ) AS has_data
           FROM workout_sessions ws
           WHERE ws.user_id = s.user_id AND ws.completed_at IS NULL
