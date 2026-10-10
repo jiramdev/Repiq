@@ -4,13 +4,16 @@
 import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
+import { workoutLockError } from "@/lib/active-workout";
 import { isDayLabel } from "@/lib/time";
-import { LIMITS, cleanText } from "@/lib/validation";
+import { LIMITS, cleanText, toId } from "@/lib/validation";
 
-export async function createPlan(title: string): Promise<number | null> {
+export async function createPlan(title: string): Promise<{ id: number | null; error?: string }> {
   const userId = await requireUserId();
+  const locked = await workoutLockError(userId);
+  if (locked) return { id: null, error: locked };
   const cleanTitle = cleanText(title, LIMITS.planTitle);
-  if (!cleanTitle) return null;
+  if (!cleanTitle) return { id: null };
 
   const result = await sql`
     INSERT INTO plans (user_id, title, exercise_count)
@@ -20,21 +23,23 @@ export async function createPlan(title: string): Promise<number | null> {
 
   revalidatePath("/schedule", "page");
   revalidatePath("/", "page");
-  return Number(result[0]?.id) || null;
+  return { id: Number(result[0]?.id) || null };
 }
 
 /** Set a weekday to a plan (by id) or to rest ("rest" / null). */
 export async function assignPlanToWorkout(
   dayLabel: string,
   planValue?: number | string | null
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; error?: string }> {
   const userId = await requireUserId();
+  const locked = await workoutLockError(userId);
+  if (locked) return { success: false, error: locked };
   if (!isDayLabel(dayLabel)) return { success: false };
 
   let plan: { id: number; title: string; exercise_count: number } | null = null;
   if (planValue != null && planValue !== "rest") {
-    const planId = Number(planValue);
-    if (!Number.isInteger(planId)) return { success: false };
+    const planId = toId(typeof planValue === "string" ? Number(planValue) : planValue);
+    if (planId === null) return { success: false };
     const rows = await sql`
       SELECT id, title, exercise_count FROM plans
       WHERE id = ${planId} AND user_id = ${userId}
@@ -68,10 +73,17 @@ export async function assignPlanToWorkout(
   if (updated.length > 0) {
     workoutId = Number(updated[0].id);
     // The plan changed: an unfinished session for the old plan no longer applies.
+    // Only empty ones are removed; a session with logged sets is never deleted
+    // silently (it stays until the user finishes or discards it).
     await sql`
-      DELETE FROM workout_sessions
-      WHERE workout_id = ${workoutId} AND user_id = ${userId} AND completed_at IS NULL
-        AND plan_id IS DISTINCT FROM ${planId}
+      DELETE FROM workout_sessions s
+      WHERE s.workout_id = ${workoutId} AND s.user_id = ${userId} AND s.completed_at IS NULL
+        AND s.plan_id IS DISTINCT FROM ${planId}
+        AND NOT EXISTS (
+          SELECT 1 FROM workout_logs l
+          WHERE l.session_id = s.id
+            AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL)
+        )
     `;
   } else {
     const inserted = await sql`

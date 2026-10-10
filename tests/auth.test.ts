@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSql, freshDb } from "./helpers/pg";
 import { holder } from "./helpers/setup-db-mock";
 import { cookieJar } from "./helpers/next-mocks";
@@ -13,15 +13,20 @@ const { loginUser, registerAndOnboard, checkUsernameAvailable, logoutUser } = aw
   "@/app/auth/actions"
 );
 const { changePassword } = await import("@/app/account/actions");
-const { isBcryptHash } = await import("@/lib/password");
+const { isBcryptHash, hashPassword } = await import("@/lib/password");
 const { SESSION_COOKIE, LEGACY_SESSION_COOKIE } = await import("@/lib/session-token");
 
-async function seedLegacyUser() {
+let passHash = "";
+beforeAll(async () => {
+  passHash = await hashPassword("plain-pass");
+});
+
+async function seedLegacyUser(passwordHash = passHash) {
   const sql = holder.sql!;
   await sql`INSERT INTO users (id, email, name) VALUES ('usr_legacy', 'old@repiq.app', 'Old')`;
   await sql`
     INSERT INTO user_profiles (user_id, name, username, email, age, password_hash)
-    VALUES ('usr_legacy', 'Old', 'oldtimer', 'old@repiq.app', 30, 'plain-pass')
+    VALUES ('usr_legacy', 'Old', 'oldtimer', 'old@repiq.app', 30, ${passwordHash})
   `;
 }
 
@@ -48,7 +53,7 @@ describe("sessions", () => {
     expect(await getSessionUserId()).toBeNull();
   });
 
-  it("logs in, re-hashes a legacy plain-text password, and logs out", async () => {
+  it("logs in with a bcrypt password, stores only a token hash, and logs out", async () => {
     await seedLegacyUser();
 
     expect(await loginUser({ identifier: "oldtimer", password: "wrong" })).toMatchObject({
@@ -60,8 +65,7 @@ describe("sessions", () => {
     expect(res).toEqual({ success: true });
     expect(await getSessionUserId()).toBe("usr_legacy");
 
-    const [row] = await holder.sql!`SELECT password_hash, timezone FROM user_profiles WHERE user_id = 'usr_legacy'`;
-    expect(isBcryptHash(String(row.password_hash))).toBe(true);
+    const [row] = await holder.sql!`SELECT timezone FROM user_profiles WHERE user_id = 'usr_legacy'`;
     expect(row.timezone).toBe("Europe/London");
 
     // The token in the cookie is not what the DB stores.
@@ -69,11 +73,56 @@ describe("sessions", () => {
     const stored = await holder.sql!`SELECT token_hash FROM sessions`;
     expect(stored[0].token_hash).not.toBe(token);
 
-    // Still works with the new hash.
-    expect((await loginUser({ identifier: "oldtimer", password: "plain-pass" })).success).toBe(true);
-
-    await expect(logoutUser()).rejects.toThrow("NEXT_REDIRECT /auth");
+    expect(await logoutUser()).toEqual({ success: true });
     expect(cookieJar.has(SESSION_COOKIE)).toBe(false);
+    expect(await holder.sql!`SELECT 1 FROM sessions`).toHaveLength(0);
+  });
+
+  it("no longer accepts a plain-text password left in the database", async () => {
+    await seedLegacyUser("plain-pass");
+    expect(await loginUser({ identifier: "oldtimer", password: "plain-pass" })).toMatchObject({
+      success: false,
+      error: "Invalid username or password.",
+    });
+    expect(cookieJar.has(SESSION_COOKIE)).toBe(false);
+  });
+
+  it("rate-limits sign-in attempts per account before checking the password", async () => {
+    await seedLegacyUser();
+    for (let i = 0; i < 10; i++) {
+      expect((await loginUser({ identifier: "oldtimer", password: `wrong-${i}` })).error).toBe(
+        "Invalid username or password."
+      );
+    }
+    const blocked = await loginUser({ identifier: "OldTimer", password: "plain-pass" });
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toMatch(/Too many attempts/);
+    // Other accounts aren't affected.
+    expect((await loginUser({ identifier: "someone-else", password: "x" })).error).toBe(
+      "Invalid username or password."
+    );
+  });
+
+  it("logging in cleans up expired sessions", async () => {
+    await seedLegacyUser();
+    await holder.sql!`
+      INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ('usr_legacy', 'old', now() - interval '1 day')
+    `;
+    await loginUser({ identifier: "oldtimer", password: "plain-pass" });
+    expect(await holder.sql!`SELECT 1 FROM sessions WHERE token_hash = 'old'`).toHaveLength(0);
+  });
+
+  it("logging out forgets this device's push subscription", async () => {
+    await seedLegacyUser();
+    await loginUser({ identifier: "oldtimer", password: "plain-pass" });
+    await holder.sql!`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES
+        ('usr_legacy', 'https://push.example/this', 'k', 'a'),
+        ('usr_legacy', 'https://push.example/other', 'k', 'a')
+    `;
+    expect(await logoutUser({ pushEndpoint: "https://push.example/this" })).toEqual({ success: true });
+    const left = await holder.sql!`SELECT endpoint FROM push_subscriptions`;
+    expect(left.map((r) => r.endpoint)).toEqual(["https://push.example/other"]);
   });
 
   it("expired sessions are not accepted", async () => {
@@ -122,6 +171,31 @@ describe("registration", () => {
     expect(isBcryptHash(String(profile.password_hash))).toBe(true);
     const days = await holder.sql!`SELECT day_label FROM workouts WHERE user_id = ${userId}`;
     expect(days).toHaveLength(7);
+  });
+
+  it("stores the body weight from sign-up in the profile and as the first weight log entry", async () => {
+    expect(await registerAndOnboard({ ...base, body_weight: "171,5", weight_unit: "lbs" })).toEqual({ success: true });
+    const userId = (await getSessionUserId())!;
+    const [profile] = await holder.sql!`
+      SELECT unit_system, body_weight::float AS body_weight, body_weight_unit FROM user_profiles WHERE user_id = ${userId}
+    `;
+    expect(profile).toEqual({ unit_system: "lbs", body_weight: 171.5, body_weight_unit: "lbs" });
+    const metrics = await holder.sql!`SELECT type, value::float AS value, unit FROM metrics WHERE user_id = ${userId}`;
+    expect(metrics).toEqual([{ type: "weight", value: 171.5, unit: "lbs" }]);
+  });
+
+  it("body weight is optional, but validated when given", async () => {
+    expect(await registerAndOnboard({ ...base, body_weight: "9", weight_unit: "kg" })).toEqual({
+      success: false,
+      error: "Please enter a body weight between 25 and 400 kg.",
+    });
+    expect((await registerAndOnboard({ ...base, body_weight: "abc" })).success).toBe(false);
+    expect(await holder.sql!`SELECT id FROM users`).toHaveLength(0);
+
+    expect(await registerAndOnboard({ ...base, body_weight: "" })).toEqual({ success: true });
+    expect(await holder.sql!`SELECT 1 FROM metrics`).toHaveLength(0);
+    const [p] = await holder.sql!`SELECT unit_system, body_weight FROM user_profiles`;
+    expect(p).toEqual({ unit_system: "kg", body_weight: null });
   });
 
   it("enforces the minimum password length on the server", async () => {

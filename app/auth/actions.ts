@@ -1,17 +1,14 @@
 // app/auth/actions.ts
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import crypto from "crypto";
 import { sql, isUniqueViolation } from "@/lib/db";
-import { createSession, destroySession } from "@/lib/auth";
-import {
-  hashPassword,
-  normalizePassword,
-  validateNewPassword,
-  verifyPassword,
-} from "@/lib/password";
+import { createSession, destroySession, getSessionUserId } from "@/lib/auth";
+import { getActiveWorkout } from "@/lib/active-workout";
+import { RATE_LIMITS, clientIp, rateLimit, retryMessage } from "@/lib/rate-limit";
+import { headers } from "next/headers";
+import { hashPassword, normalizePassword, validateNewPassword, verifyPassword } from "@/lib/password";
 import { isValidTimeZone, DEFAULT_TIMEZONE, DAY_LABELS } from "@/lib/time";
 import {
   EMAIL_PATTERN,
@@ -23,8 +20,13 @@ import {
   toIntInRange,
 } from "@/lib/validation";
 import { str } from "@/lib/strings";
+import { bodyWeightRange, normalizeUnit, parseBodyWeight } from "@/lib/units";
 
 type Result = { success: boolean; error?: string };
+
+async function requestIp(): Promise<string> {
+  return clientIp(await headers());
+}
 
 function validateUsername(username: string): string | null {
   if (!username) return str.auth.enterUsername;
@@ -39,6 +41,9 @@ export async function checkUsernameAvailable(
   const username = normalizeUsername(rawUsername);
   const invalid = validateUsername(username);
   if (invalid) return { available: false, error: invalid };
+
+  const limited = await rateLimit(RATE_LIMITS.usernameCheckIp, await requestIp());
+  if (!limited.ok) return { available: false, error: retryMessage(limited.retryAfterSeconds) };
 
   try {
     const existing = await sql`
@@ -68,6 +73,18 @@ export async function loginUser(formData: {
     return { success: false, error: str.auth.fillAllFields };
   }
 
+  // Checked before the (deliberately slow) password hash comparison.
+  const [byIp, byAccount] = await Promise.all([
+    rateLimit(RATE_LIMITS.loginIp, await requestIp()),
+    rateLimit(RATE_LIMITS.loginAccount, identifier),
+  ]);
+  if (!byIp.ok || !byAccount.ok) {
+    return {
+      success: false,
+      error: retryMessage(Math.max(byIp.retryAfterSeconds, byAccount.retryAfterSeconds)),
+    };
+  }
+
   try {
     const rows = await sql`
       SELECT p.user_id, p.password_hash
@@ -81,23 +98,12 @@ export async function loginUser(formData: {
     `;
 
     const user = rows[0];
-    const { ok, needsRehash } = await verifyPassword(password, user?.password_hash ?? null);
+    const ok = await verifyPassword(password, (user?.password_hash as string | null) ?? null);
     if (!user || !ok) {
       return { success: false, error: str.auth.invalidCredentials };
     }
 
     const userId = String(user.user_id);
-
-    if (needsRehash) {
-      // Legacy plain-text password: replace it with a bcrypt hash now. Only
-      // overwrite if it is still the same plain-text value.
-      const hashed = await hashPassword(password);
-      await sql`
-        UPDATE user_profiles
-        SET password_hash = ${hashed}, updated_at = now()
-        WHERE user_id = ${userId} AND password_hash = ${user.password_hash}
-      `;
-    }
 
     if (isValidTimeZone(formData.timeZone)) {
       await sql`
@@ -122,6 +128,9 @@ export async function registerAndOnboard(data: {
   email: string;
   password: string;
   age: number;
+  /** Optional. In `weight_unit`, which also becomes the account's unit. */
+  body_weight?: number | string | null;
+  weight_unit?: string;
   notify_workout_reminders: boolean;
   notify_rest_day_alerts: boolean;
   timeZone?: string;
@@ -140,8 +149,20 @@ export async function registerAndOnboard(data: {
     return { success: false, error: str.auth.emailInvalid };
   }
   if (age === null) return { success: false, error: str.auth.ageInvalid };
+
+  const unit = normalizeUnit(data?.weight_unit);
+  const weightGiven = data?.body_weight != null && String(data.body_weight).trim() !== "";
+  const bodyWeight = weightGiven ? parseBodyWeight(data.body_weight, unit) : null;
+  if (weightGiven && bodyWeight === null) {
+    const { min, max } = bodyWeightRange(unit);
+    return { success: false, error: str.auth.weightInvalid(min, max, unit) };
+  }
+
   const passwordError = validateNewPassword(data.password);
   if (passwordError) return { success: false, error: passwordError };
+
+  const limited = await rateLimit(RATE_LIMITS.registerIp, await requestIp());
+  if (!limited.ok) return { success: false, error: retryMessage(limited.retryAfterSeconds) };
 
   const timeZone = isValidTimeZone(data.timeZone) ? data.timeZone : DEFAULT_TIMEZONE;
   const userId = `usr_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -163,7 +184,8 @@ export async function registerAndOnboard(data: {
 
     const passwordHash = await hashPassword(data.password);
 
-    // One transaction: either the user, profile and 7-day schedule all exist, or none do.
+    // One transaction: either the user, profile, 7-day schedule and first
+    // weight entry all exist, or none do.
     await sql.transaction([
       sql`
         INSERT INTO users (id, email, name)
@@ -172,10 +194,12 @@ export async function registerAndOnboard(data: {
       sql`
         INSERT INTO user_profiles (
           user_id, name, username, email, age, password_hash, unit_system,
-          timezone, notify_workout_reminders, notify_rest_day_alerts
+          timezone, notify_workout_reminders, notify_rest_day_alerts,
+          body_weight, body_weight_unit
         ) VALUES (
-          ${userId}, ${name}, ${username}, ${email}, ${age}, ${passwordHash}, 'kg',
-          ${timeZone}, ${Boolean(data.notify_workout_reminders)}, ${Boolean(data.notify_rest_day_alerts)}
+          ${userId}, ${name}, ${username}, ${email}, ${age}, ${passwordHash}, ${unit},
+          ${timeZone}, ${Boolean(data.notify_workout_reminders)}, ${Boolean(data.notify_rest_day_alerts)},
+          ${bodyWeight}, ${bodyWeight === null ? null : unit}
         )
       `,
       sql`
@@ -183,6 +207,14 @@ export async function registerAndOnboard(data: {
         SELECT ${userId}, 'Rest', d, 0, false
         FROM unnest(${[...DAY_LABELS]}::text[]) AS d
       `,
+      ...(bodyWeight === null
+        ? []
+        : [
+            sql`
+              INSERT INTO metrics (user_id, type, value, unit, recorded_at)
+              VALUES (${userId}, 'weight', ${bodyWeight}, ${unit}, now())
+            `,
+          ]),
     ]);
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -208,7 +240,21 @@ export async function registerAndOnboard(data: {
   return { success: true };
 }
 
-export async function logoutUser() {
+/**
+ * Sign out. Blocked while a workout is active (finish or discard it first).
+ * Also forgets this device's push subscription, so it stops receiving the
+ * signed-out user's notifications. The client then clears its caches and goes
+ * to /auth itself.
+ */
+export async function logoutUser(options?: { pushEndpoint?: string | null }): Promise<Result> {
+  const userId = await getSessionUserId();
+  if (userId && (await getActiveWorkout(userId))) {
+    return { success: false, error: str.workout.locked };
+  }
+  const endpoint = typeof options?.pushEndpoint === "string" ? options.pushEndpoint.slice(0, 1024) : "";
+  if (userId && endpoint) {
+    await sql`DELETE FROM push_subscriptions WHERE user_id = ${userId} AND endpoint = ${endpoint}`;
+  }
   await destroySession();
-  redirect("/auth");
+  return { success: true };
 }

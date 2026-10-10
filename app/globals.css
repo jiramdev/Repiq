@@ -25,3 +25,27 @@ body {
   transform: scale(0.97);
   opacity: 0.9;
 }
+/* Loading screen (components/loading-screen.tsx). Symmetric safe-area padding
+   keeps the mark exactly centred, like the iOS startup images, while never
+   letting it run under a notch or home indicator. */
+.repiq-loading {
+  padding-block: max(env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px));
+  padding-inline: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+}
+
+.repiq-loading-mark {
+  /* Same rule as logoWidthFor() in lib/splash.ts. */
+  width: clamp(140px, 42vw, 420px);
+  max-width: 100%;
+  animation: repiq-pulse 1.8s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+@keyframes repiq-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.97); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repiq-loading-mark { animation: none; }
+}

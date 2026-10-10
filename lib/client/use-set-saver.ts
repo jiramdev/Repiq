@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { updateLogSet, type LogPatch } from "@/app/workout/[id]/actions";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "offline" | "error";
@@ -10,6 +11,23 @@ const DEBOUNCE_MS = 700;
 const MAX_BACKOFF_MS = 30_000;
 
 type PendingMap = Record<number, LogPatch>;
+
+const RELOAD_FLAG = "repiq:reloaded-for-new-version";
+
+/**
+ * After a deploy, an open app may still run the old code, whose Server Action
+ * ids the new server doesn't know. Unsent edits are already in localStorage,
+ * so reload once to pick up the new version; they're re-sent after the reload.
+ */
+function reloadForNewVersion() {
+  try {
+    if (sessionStorage.getItem(RELOAD_FLAG)) return;
+    sessionStorage.setItem(RELOAD_FLAG, "1");
+  } catch {
+    // no sessionStorage: still reload
+  }
+  window.location.reload();
+}
 
 function storageKey(sessionId: number) {
   return `repiq:pending:${sessionId}`;
@@ -46,6 +64,8 @@ function writePending(sessionId: number, pending: PendingMap) {
 export function useSetSaver(sessionId: number) {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const pending = useRef<PendingMap>({});
+  /** The batch being sent right now; kept in storage until it's confirmed. */
+  const sending = useRef<PendingMap>({});
   const inflight = useRef<Promise<void> | null>(null);
   const debounce = useRef<number | undefined>(undefined);
   const retry = useRef<number | undefined>(undefined);
@@ -54,7 +74,14 @@ export function useSetSaver(sessionId: number) {
   const flushRef = useRef<() => Promise<void>>(async () => {});
   const later = (ms: number) => window.setTimeout(() => void flushRef.current(), ms);
 
-  const persist = useCallback(() => writePending(sessionId, pending.current), [sessionId]);
+  // Storage always holds everything unconfirmed: the batch in flight plus newer edits.
+  const persist = useCallback(() => {
+    const merged: PendingMap = { ...sending.current };
+    for (const [id, patch] of Object.entries(pending.current)) {
+      merged[Number(id)] = { ...merged[Number(id)], ...patch };
+    }
+    writePending(sessionId, merged);
+  }, [sessionId]);
 
   const flush = useCallback(async (): Promise<void> => {
     window.clearTimeout(debounce.current);
@@ -68,24 +95,34 @@ export function useSetSaver(sessionId: number) {
     const ids = Object.keys(batch).map(Number);
     if (ids.length === 0) return;
     pending.current = {};
+    sending.current = batch;
 
     const run = (async () => {
       setStatus("saving");
       const failed: PendingMap = {};
+      let outdated = false;
       for (const id of ids) {
         try {
           await updateLogSet(id, batch[id]);
           // ok, or a permanent refusal (retry: false): either way, stop sending it.
-        } catch {
+        } catch (err) {
           failed[id] = batch[id];
+          if (unstable_isUnrecognizedActionError(err)) outdated = true;
         }
       }
+      sending.current = {};
 
       // Newer edits made while we were sending win over the failed ones.
       for (const [id, patch] of Object.entries(failed)) {
         pending.current[Number(id)] = { ...patch, ...pending.current[Number(id)] };
       }
       persist();
+
+      if (outdated) {
+        setStatus("error");
+        reloadForNewVersion();
+        return;
+      }
 
       if (Object.keys(failed).length > 0) {
         attempts.current += 1;
@@ -94,6 +131,11 @@ export function useSetSaver(sessionId: number) {
         retry.current = later(delay);
       } else {
         attempts.current = 0;
+        try {
+          sessionStorage.removeItem(RELOAD_FLAG);
+        } catch {
+          // ignore
+        }
         setStatus(Object.keys(pending.current).length > 0 ? "saving" : "saved");
         if (Object.keys(pending.current).length > 0) {
           debounce.current = later(DEBOUNCE_MS);
@@ -128,13 +170,14 @@ export function useSetSaver(sessionId: number) {
   /** Send everything now. Resolves true when nothing is left unsaved. */
   const flushNow = useCallback(async (): Promise<boolean> => {
     await flush();
-    return Object.keys(pending.current).length === 0;
+    return Object.keys(pending.current).length === 0 && Object.keys(sending.current).length === 0;
   }, [flush]);
 
   const forget = useCallback(() => {
     window.clearTimeout(debounce.current);
     window.clearTimeout(retry.current);
     pending.current = {};
+    sending.current = {};
     persist();
   }, [persist]);
 

@@ -1,9 +1,10 @@
 // app/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import Link from "next/link";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { getUserProfile } from "@/lib/user";
 import { todayIn, resolveTimeZone } from "@/lib/time";
 import { convertWeight } from "@/lib/units";
@@ -13,7 +14,7 @@ import { MorningWorkoutNotifier } from "./morning-notifier";
 
 async function DashboardContent() {
   await connection();
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
   const profile = await getUserProfile(userId);
   const unit = profile?.unit_system ?? "kg";
   const today = todayIn(resolveTimeZone(profile?.timezone));
@@ -27,11 +28,7 @@ async function DashboardContent() {
         EXISTS (
           SELECT 1 FROM completed_sessions c
           WHERE c.user_id = ${userId} AND c.workout_id = w.id AND c.completed_date = ${today.date}::date
-        ) AS done_today,
-        EXISTS (
-          SELECT 1 FROM workout_sessions ws
-          WHERE ws.workout_id = w.id AND ws.user_id = ${userId} AND ws.completed_at IS NULL
-        ) AS in_progress
+        ) AS done_today
       FROM workouts w
       LEFT JOIN plans p ON p.id = w.plan_id AND p.user_id = w.user_id
       WHERE w.user_id = ${userId} AND w.day_label = ${today.dayLabel}
@@ -56,7 +53,6 @@ async function DashboardContent() {
           name: String(row.title),
           exercise_count: Number(row.exercise_count) || 0,
           doneToday: Boolean(row.done_today),
-          inProgress: Boolean(row.in_progress),
         }
       : null;
 
@@ -77,7 +73,7 @@ async function DashboardContent() {
       )}
 
       {todayWorkout ? (
-        todayWorkout.doneToday && !todayWorkout.inProgress ? (
+        todayWorkout.doneToday ? (
           <div className={todayWidget}>
             <p className={label}>{str.dashboard.today(today.dayLabel)}</p>
             <p className={`${metric} tracking-tight`}>{str.dashboard.finished}</p>
@@ -94,11 +90,7 @@ async function DashboardContent() {
           <Link href={`/workout/${todayWorkout.id}`} prefetch={false} className={todayWidget}>
             <p className={label}>{str.dashboard.today(today.dayLabel)}</p>
             <p className={`${metric} tracking-tight`}>{todayWorkout.name}</p>
-            <p className={bodyMuted}>
-              {todayWorkout.inProgress
-                ? str.dashboard.resume
-                : str.dashboard.exercisesScheduled(todayWorkout.exercise_count)}
-            </p>
+            <p className={bodyMuted}>{str.dashboard.exercisesScheduled(todayWorkout.exercise_count)}</p>
           </Link>
         )
       ) : (
@@ -131,17 +123,7 @@ export default function DashboardPage() {
       <main className={`w-full ${s.stack} pt-2`}>
         <Header title={str.dashboard.title} />
 
-        <Suspense
-          fallback={
-            <div className={`${s.stack} animate-pulse`}>
-              <div className={`${todayWidget} opacity-60 h-28`}></div>
-              <div className={`grid grid-cols-2 ${s.gap}`}>
-                <div className={`${card} aspect-square opacity-60`} />
-                <div className={`${card} aspect-square opacity-60`} />
-              </div>
-            </div>
-          }
-        >
+        <Suspense fallback={<LoadingScreen />}>
           <DashboardContent />
         </Suspense>
       </main>

@@ -1,18 +1,17 @@
 // app/statistics/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { getUserPrefs } from "@/lib/user";
 import { todayIn } from "@/lib/time";
 import { convertWeight } from "@/lib/units";
-import { str } from "@/lib/strings";
 import { StatisticsView } from "./statistics-view";
-import { Header, page, s } from "@/components/ui";
 
 async function StatisticsContent() {
   await connection();
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
   const { unit, timeZone } = await getUserPrefs(userId);
   const today = todayIn(timeZone);
 
@@ -52,20 +51,7 @@ async function StatisticsContent() {
 
 export default function StatisticsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className={page()}>
-          <main className={`max-w-sm mx-auto ${s.stack} animate-pulse`}>
-            <Header title={str.statistics.title} />
-            <div className="grid grid-cols-2 gap-3.5">
-              <div className="aspect-square rounded-[30px] bg-[#141416]/50" />
-              <div className="aspect-square rounded-[30px] bg-[#141416]/50" />
-            </div>
-            <div className={`h-48 rounded-[30px] bg-[#141416]/50`} />
-          </main>
-        </div>
-      }
-    >
+    <Suspense fallback={<LoadingScreen />}>
       <StatisticsContent />
     </Suspense>
   );

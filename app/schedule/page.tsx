@@ -1,16 +1,15 @@
 // app/schedule/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { WEEK_ORDER } from "@/lib/time";
-import { str } from "@/lib/strings";
 import { ScheduleView } from "./schedule-view";
-import { Header, page as pageStyle, s, todayWidget, card } from "@/components/ui";
 
 async function ScheduleContent() {
   await connection();
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
 
   const [workoutsResult, plansResult] = await Promise.all([
     sql`
@@ -50,17 +49,7 @@ async function ScheduleContent() {
 
 export default function SchedulePage() {
   return (
-    <Suspense
-      fallback={
-        <div className={pageStyle()}>
-          <main className={`max-w-sm mx-auto ${s.stack} animate-pulse`}>
-            <Header title={str.schedule.title} />
-            <div className={`${todayWidget} opacity-60 h-44`} />
-            <div className={`${card} opacity-60 h-36`} />
-          </main>
-        </div>
-      }
-    >
+    <Suspense fallback={<LoadingScreen />}>
       <ScheduleContent />
     </Suspense>
   );

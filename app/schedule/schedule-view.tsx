@@ -16,6 +16,7 @@ import {
   bodyMuted,
 } from "@/components/ui";
 import { str } from "@/lib/strings";
+import { reloadIfLocked } from "@/lib/client/locked";
 
 interface ScheduleItem {
   day_label: string;
@@ -42,7 +43,7 @@ export function ScheduleView({
 
   const handleSelect = (item: ScheduleItem, planValue: string) => {
     startTransition(async () => {
-      await assignPlanToWorkout(item.day_label, planValue);
+      reloadIfLocked(await assignPlanToWorkout(item.day_label, planValue));
     });
   };
 
@@ -51,7 +52,7 @@ export function ScheduleView({
     if (!newPlanTitle.trim()) return;
 
     startTransition(async () => {
-      await createPlan(newPlanTitle);
+      if (reloadIfLocked(await createPlan(newPlanTitle))) return;
       setNewPlanTitle("");
       setIsAdding(false);
     });

@@ -1,6 +1,5 @@
 // lib/password.ts
 import bcrypt from "bcryptjs";
-import { createHash, timingSafeEqual } from "crypto";
 
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from "@/lib/password-rules";
 
@@ -33,39 +32,21 @@ export async function hashPassword(raw: string): Promise<string> {
   return bcrypt.hash(normalizePassword(raw), BCRYPT_COST);
 }
 
-function constantTimeEquals(a: string, b: string): boolean {
-  // Hash first so inputs of different lengths still compare in constant time.
-  const da = createHash("sha256").update(a, "utf8").digest();
-  const db = createHash("sha256").update(b, "utf8").digest();
-  return timingSafeEqual(da, db);
-}
-
-// A real hash to compare against when the user doesn't exist, so response
-// time doesn't reveal which usernames are registered.
+// A real hash to compare against when there is nothing valid to check, so
+// response time doesn't reveal which usernames are registered.
 const DUMMY_HASH = "$2b$12$o05e0c04WIt8//3vzrvcHuRhCqNyTqUrnUSF4YfXD2nyldwfWKoKG";
 
-export async function verifyPassword(
-  raw: string,
-  stored: string | null | undefined
-): Promise<{ ok: boolean; needsRehash: boolean }> {
+/**
+ * Checks a password against a stored bcrypt hash. Anything that isn't a bcrypt
+ * hash (a missing value, or a leftover plain-text password that migration 0006
+ * didn't convert) never matches.
+ */
+export async function verifyPassword(raw: string, stored: string | null | undefined): Promise<boolean> {
   const password = normalizePassword(raw);
-
-  if (!stored) {
+  if (!isBcryptHash(stored)) {
     await bcrypt.compare(password, DUMMY_HASH).catch(() => false);
-    return { ok: false, needsRehash: false };
+    return false;
   }
-
-  if (isBcryptHash(stored)) {
-    const ok = await bcrypt.compare(password, stored);
-    return { ok, needsRehash: false };
-  }
-
-  // Legacy row: the password was stored as plain text. Accept it once and
-  // tell the caller to replace it with a bcrypt hash.
-  const ok = password.length > 0 && constantTimeEquals(password, stored);
-  return { ok, needsRehash: ok };
-}
-
-export async function burnPasswordCheck(raw: string): Promise<void> {
-  await verifyPassword(raw, null);
+  if (!password) return false;
+  return bcrypt.compare(password, stored as string);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { todayIn, isValidTimeZone, resolveTimeZone, DEFAULT_TIMEZONE } from "@/lib/time";
-import { convertWeight, normalizeUnit } from "@/lib/units";
+import { bodyWeightRange, convertWeight, normalizeUnit, parseBodyWeight } from "@/lib/units";
 import { toIntInRange, toNumberInRange, cleanText, normalizeUsername } from "@/lib/validation";
 import {
   generateSessionToken,
@@ -78,5 +78,26 @@ describe("session tokens", () => {
     expect(looksLikeSessionToken("usr_1234567890abcdef")).toBe(false);
     expect(looksLikeSessionToken("")).toBe(false);
     expect(looksLikeSessionToken(undefined)).toBe(false);
+  });
+});
+
+describe("body weight", () => {
+  it("has the same range in both units", () => {
+    expect(bodyWeightRange("kg")).toEqual({ min: 25, max: 400 });
+    expect(bodyWeightRange("lbs")).toEqual({ min: 56, max: 881 });
+  });
+
+  it("parses numbers and decimal-comma strings, rounded to 0.1", () => {
+    expect(parseBodyWeight("78,46", "kg")).toBe(78.5);
+    expect(parseBodyWeight(180, "lbs")).toBe(180);
+    expect(parseBodyWeight(" 70 ", "kg")).toBe(70);
+  });
+
+  it("rejects empty, non-numeric and out-of-range values", () => {
+    for (const v of ["", "  ", "abc", null, undefined, NaN, Infinity, 24.9, 401]) {
+      expect(parseBodyWeight(v, "kg")).toBeNull();
+    }
+    expect(parseBodyWeight(50, "lbs")).toBeNull();
+    expect(parseBodyWeight(900, "lbs")).toBeNull();
   });
 });

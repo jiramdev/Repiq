@@ -1,5 +1,6 @@
 // app/auth/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/auth";
 import { AuthForm } from "./auth-form";
@@ -14,7 +15,7 @@ async function RedirectIfSignedIn() {
 export default function AuthPage() {
   return (
     <>
-      <Suspense fallback={null}>
+      <Suspense fallback={<LoadingScreen />}>
         <RedirectIfSignedIn />
       </Suspense>
       <AuthForm />

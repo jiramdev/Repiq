@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { getSessionUserId } from "@/lib/auth";
-import { LIMITS, toIntInRange } from "@/lib/validation";
+import { LIMITS, UUID_PATTERN, toId, toIntInRange } from "@/lib/validation";
+import { RATE_LIMITS, rateLimit } from "@/lib/rate-limit";
 import {
   appBaseUrl,
   cancelRestTimers,
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
   }
   const { restSeconds, workoutId } = (body ?? {}) as Record<string, unknown>;
   const seconds = toIntInRange(restSeconds, LIMITS.timerSeconds.min, LIMITS.timerSeconds.max);
-  const workout = toIntInRange(workoutId, 1, 2_147_483_647);
+  const workout = toId(workoutId);
   if (seconds === null || workout === null) {
     return NextResponse.json({ error: "Invalid restSeconds or workoutId" }, { status: 400 });
   }
@@ -32,6 +33,14 @@ export async function POST(req: Request) {
     SELECT 1 FROM workouts WHERE id = ${workout} AND user_id = ${userId} LIMIT 1
   `;
   if (owned.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const limited = await rateLimit(RATE_LIMITS.restTimerUser, userId);
+  if (!limited.ok) {
+    return NextResponse.json(
+      { scheduled: false, reason: "rate_limited" },
+      { status: 429, headers: { "Retry-After": String(limited.retryAfterSeconds) } }
+    );
+  }
 
   if (!isRestPushAvailable()) {
     // Degrade gracefully: the client falls back to its in-app alarm.
@@ -60,7 +69,10 @@ export async function DELETE(req: Request) {
   let timerId: string | undefined;
   try {
     const body = (await req.json()) as { timerId?: unknown };
-    if (typeof body?.timerId === "string" && /^[0-9a-f-]{36}$/i.test(body.timerId)) {
+    if (typeof body?.timerId === "string") {
+      if (!UUID_PATTERN.test(body.timerId)) {
+        return NextResponse.json({ error: "Invalid timerId" }, { status: 400 });
+      }
       timerId = body.timerId;
     }
   } catch {

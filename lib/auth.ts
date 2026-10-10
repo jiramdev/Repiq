@@ -7,6 +7,7 @@ import {
   SESSION_COOKIE,
   LEGACY_SESSION_COOKIE,
   SESSION_TTL_SECONDS,
+  SESSION_COOKIE_OPTIONS,
   generateSessionToken,
   hashSessionToken,
   looksLikeSessionToken,
@@ -43,6 +44,8 @@ export async function createSession(userId: string): Promise<void> {
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
   const userAgent = (await headers()).get("user-agent")?.slice(0, 255) ?? null;
 
+  // Housekeeping: drop expired sessions (indexed, cheap) instead of a cron job.
+  await sql`DELETE FROM sessions WHERE expires_at < now()`;
   await sql`
     INSERT INTO sessions (user_id, token_hash, expires_at, user_agent)
     VALUES (${userId}, ${hashSessionToken(token)}, ${expiresAt.toISOString()}, ${userAgent})
@@ -50,13 +53,7 @@ export async function createSession(userId: string): Promise<void> {
 
   const cookieStore = await cookies();
   cookieStore.delete(LEGACY_SESSION_COOKIE);
-  cookieStore.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  });
+  cookieStore.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
 }
 
 export async function destroySession(): Promise<void> {

@@ -1,21 +1,30 @@
 /* Repiq service worker.
  *
- * - Navigations: network first, falling back to the last cached copy of that
- *   page, then to the cached dashboard, then to /offline.html.
+ * - Navigations: network first with a 4 s timeout. On timeout or offline it
+ *   falls back to the cached copy of that page, else /offline.html. It never
+ *   serves one page's HTML under another URL.
+ * - Workout lock-in: while this device knows of an active workout, offline
+ *   (or slow) navigations to any other page are redirected to that workout.
  * - /_next/static (content-hashed): cache first.
  * - Icons, fonts, manifest: stale-while-revalidate.
- * - API routes, server actions (POST) and RSC fetches are never cached.
+ * - API routes, server actions (POST), RSC fetches and /auth are never cached.
+ * - Cached pages hold the signed-in user's data: at most MAX_PAGES are kept,
+ *   and they're wiped on sign-out and whenever the sign-in page loads.
  * - Updates wait until the page asks (SKIP_WAITING) so a workout is never
  *   reloaded underneath the user.
  *
  * Bump VERSION when this file's caching logic changes.
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC_CACHE = `repiq-static-${VERSION}`;
 const PAGE_CACHE = `repiq-pages-${VERSION}`;
 const ASSET_CACHE = `repiq-assets-${VERSION}`;
+const META_CACHE = "repiq-meta";
+const ACTIVE_WORKOUT_KEY = "/__repiq/active-workout";
 const OFFLINE_URL = "/offline.html";
-const PRECACHE = [OFFLINE_URL, "/icons/icon-192.png", "/icons/icon-512.png"];
+const PRECACHE = [OFFLINE_URL, "/icons/icon-192.png", "/icons/icon-512.png", "/icons/logo.svg"];
+const NAVIGATION_TIMEOUT_MS = 4000;
+const MAX_PAGES = 25;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(STATIC_CACHE).then((cache) => cache.addAll(PRECACHE)));
@@ -24,7 +33,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keep = new Set([STATIC_CACHE, PAGE_CACHE, ASSET_CACHE]);
+      const keep = new Set([STATIC_CACHE, PAGE_CACHE, ASSET_CACHE, META_CACHE]);
       const keys = await caches.keys();
       await Promise.all(
         keys.filter((k) => k.startsWith("repiq-") && !keep.has(k)).map((k) => caches.delete(k))
@@ -37,35 +46,113 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// --- active workout (lock-in) ------------------------------------------------
+
+async function getActiveWorkoutUrl() {
+  try {
+    const cache = await caches.open(META_CACHE);
+    const res = await cache.match(ACTIVE_WORKOUT_KEY);
+    if (!res) return null;
+    const { url } = await res.json();
+    return typeof url === "string" && /^\/workout\/\d+$/.test(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setActiveWorkoutUrl(url) {
+  const cache = await caches.open(META_CACHE);
+  if (typeof url === "string" && /^\/workout\/\d+$/.test(url)) {
+    await cache.put(
+      ACTIVE_WORKOUT_KEY,
+      new Response(JSON.stringify({ url }), { headers: { "Content-Type": "application/json" } })
+    );
+  } else {
+    await cache.delete(ACTIVE_WORKOUT_KEY);
+  }
+}
+
 self.addEventListener("message", (event) => {
   const type = event.data && event.data.type;
   if (type === "SKIP_WAITING") {
     self.skipWaiting();
   } else if (type === "CLEAR_CACHES") {
     event.waitUntil(
-      Promise.all([caches.delete(PAGE_CACHE), caches.delete(ASSET_CACHE)])
+      Promise.all([caches.delete(PAGE_CACHE), caches.delete(ASSET_CACHE), caches.delete(META_CACHE)])
     );
+  } else if (type === "ACTIVE_WORKOUT") {
+    event.waitUntil(setActiveWorkoutUrl(event.data.url));
   }
 });
+
+// --- caching helpers ---------------------------------------------------------
 
 function isCacheableResponse(response) {
   return response && response.ok && response.type === "basic" && !response.redirected;
 }
 
-async function handleNavigation(event) {
+function isAuthPath(pathname) {
+  return pathname === "/auth" || pathname.startsWith("/auth/");
+}
+
+async function trimCache(cache, max) {
+  const keys = await cache.keys();
+  // Oldest entries first (insertion order).
+  await Promise.all(keys.slice(0, Math.max(0, keys.length - max)).map((k) => cache.delete(k)));
+}
+
+/**
+ * What to show when the network can't answer (offline or too slow):
+ * the active workout, else this page's cached copy, else (only when really
+ * offline) the offline page. Returns null when there's nothing to fall back on.
+ */
+async function fallbackFor(request, offline) {
+  const url = new URL(request.url);
+  const active = await getActiveWorkoutUrl();
+  if (active && url.pathname !== active && !isAuthPath(url.pathname)) {
+    return Response.redirect(new URL(active, self.location.origin).href, 302);
+  }
   const cache = await caches.open(PAGE_CACHE);
-  try {
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+  if (!offline) return null;
+  return (await caches.match(OFFLINE_URL)) || Response.error();
+}
+
+async function handleNavigation(event) {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  const network = (async () => {
     const preloaded = await event.preloadResponse;
-    const response = preloaded || (await fetch(event.request));
-    if (isCacheableResponse(response)) {
-      cache.put(event.request, response.clone());
+    const response = preloaded || (await fetch(request));
+    if (isCacheableResponse(response) && !isAuthPath(url.pathname)) {
+      const cache = await caches.open(PAGE_CACHE);
+      await cache.put(request, response.clone());
+      await trimCache(cache, MAX_PAGES);
     }
     return response;
+  })();
+
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), NAVIGATION_TIMEOUT_MS);
+  });
+
+  try {
+    const first = await Promise.race([network, timeout]);
+    if (first !== "timeout") return first;
+    // Weak gym wifi: show what we have instead of a blank screen, if anything.
+    const fallback = await fallbackFor(request, false);
+    if (fallback) {
+      event.waitUntil(network.catch(() => undefined));
+      return fallback;
+    }
+    return await network;
   } catch {
-    const cached =
-      (await cache.match(event.request, { ignoreSearch: true })) || (await cache.match("/"));
-    if (cached) return cached;
-    return (await caches.match(OFFLINE_URL)) || Response.error();
+    return fallbackFor(request, true);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -114,6 +201,7 @@ self.addEventListener("fetch", (event) => {
   if (
     (sameOrigin &&
       (url.pathname.startsWith("/icons/") ||
+        url.pathname.startsWith("/splash/") ||
         url.pathname.startsWith("/_next/image") ||
         url.pathname === "/manifest.webmanifest" ||
         url.pathname === "/apple-touch-icon.png" ||
@@ -150,14 +238,11 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(
     (async () => {
-      // If the app is open and visible, the in-page timer already beeps and
-      // vibrates; just tell it instead of stacking a system notification.
+      // If the app is open and in front, its own timer already beeps and
+      // vibrates, so don't stack a system notification on top.
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       const visible = windows.find((c) => c.visibilityState === "visible" && c.focused);
-      if (visible && data.type === "rest-complete") {
-        visible.postMessage({ type: "REST_COMPLETE", timerId: data.timerId });
-        return;
-      }
+      if (visible && data.type === "rest-complete") return;
       await self.registration.showNotification(title, options);
     })()
   );

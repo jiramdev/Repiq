@@ -7,7 +7,7 @@ import { requireUserId } from "@/lib/auth";
 import { getUserPrefs } from "@/lib/user";
 import { todayIn } from "@/lib/time";
 import { normalizeUnit } from "@/lib/units";
-import { LIMITS, toIntInRange, toNumberInRange } from "@/lib/validation";
+import { LIMITS, toId, toIntInRange, toNumberInRange } from "@/lib/validation";
 
 export type LogPatch = {
   actual_weight?: number | null;
@@ -28,7 +28,7 @@ export async function updateLogSet(
 ): Promise<{ ok: boolean; retry?: boolean }> {
   const userId = await requireUserId();
 
-  const id = toIntInRange(logId, 1, Number.MAX_SAFE_INTEGER);
+  const id = toId(logId);
   if (id === null || !patch || typeof patch !== "object") return { ok: false, retry: false };
 
   const hasWeight = "actual_weight" in patch;
@@ -79,7 +79,7 @@ function revalidateWorkout(workoutId: number) {
 /** Finish the open session. Safe to call twice: the second call does nothing. */
 export async function completeWorkout(workoutId: number): Promise<{ ok: boolean }> {
   const userId = await requireUserId();
-  const id = toIntInRange(workoutId, 1, Number.MAX_SAFE_INTEGER);
+  const id = toId(workoutId);
   if (id === null) return { ok: false };
 
   const { timeZone } = await getUserPrefs(userId);
@@ -101,10 +101,13 @@ export async function completeWorkout(workoutId: number): Promise<{ ok: boolean 
   return { ok: true };
 }
 
-/** Throw away the open session and every set logged in it. */
+/**
+ * Throw away the open session and every set logged in it. Only ever called by
+ * an explicit (two-step) Discard on the workout screen.
+ */
 export async function discardWorkout(workoutId: number): Promise<{ ok: boolean }> {
   const userId = await requireUserId();
-  const id = toIntInRange(workoutId, 1, Number.MAX_SAFE_INTEGER);
+  const id = toId(workoutId);
   if (id === null) return { ok: false };
 
   // Sets go with the session (ON DELETE CASCADE).

@@ -3,19 +3,26 @@ import { sql } from "@/lib/db";
 import { convertWeight, type WeightUnit } from "@/lib/units";
 import type { WorkoutLog } from "@/app/workout/[id]/types";
 
-/** Namespace for pg_advisory_xact_lock(namespace, workout_id). */
+/** Namespace for pg_advisory_xact_lock(namespace, hashtext(user_id)). */
 const SESSION_LOCK_NAMESPACE = 7301;
 
 export interface OpenSession {
   id: number;
   plan_name: string;
+  started_on: string;
 }
 
 /**
  * Returns the open session for a schedule day, creating it and its sets from
  * the plan if needed. Everything runs in one transaction behind an advisory
- * lock on the workout, so two tabs (or a double render) can't seed twice.
- * Unfinished sessions from earlier days with nothing logged are dropped.
+ * lock on the user, so two tabs (or a double render) can't seed twice and a
+ * user can never have two workouts running at once.
+ *
+ * - Unfinished sessions from earlier days with nothing logged are dropped
+ *   (for any day of the schedule). Sessions with logged sets are never dropped.
+ * - A new session is only created when the user has no other open session and
+ *   the plan has at least one exercise. Returns null when nothing is open for
+ *   this schedule day afterwards.
  */
 export async function startOrResumeSession(params: {
   userId: string;
@@ -28,11 +35,10 @@ export async function startOrResumeSession(params: {
   const { userId, workoutId, planId, planTitle, today, unit } = params;
 
   const results = await sql.transaction([
-    sql`SELECT pg_advisory_xact_lock(${SESSION_LOCK_NAMESPACE}::int, ${workoutId}::int)`,
+    sql`SELECT pg_advisory_xact_lock(${SESSION_LOCK_NAMESPACE}::int, hashtext(${userId}))`,
     sql`
       DELETE FROM workout_sessions s
-      WHERE s.workout_id = ${workoutId}
-        AND s.user_id = ${userId}
+      WHERE s.user_id = ${userId}
         AND s.completed_at IS NULL
         AND s.started_on < ${today}::date
         AND NOT EXISTS (
@@ -46,7 +52,12 @@ export async function startOrResumeSession(params: {
       SELECT ${userId}, ${workoutId}, ${planId}, ${planTitle}, ${today}::date
       WHERE NOT EXISTS (
         SELECT 1 FROM workout_sessions
-        WHERE workout_id = ${workoutId} AND completed_at IS NULL
+        WHERE (user_id = ${userId} OR workout_id = ${workoutId}) AND completed_at IS NULL
+      )
+      AND EXISTS (
+        SELECT 1 FROM plan_exercises pe
+        JOIN plans p ON p.id = pe.plan_id
+        WHERE pe.plan_id = ${planId} AND p.user_id = ${userId}
       )
     `,
     sql`
@@ -71,7 +82,7 @@ export async function startOrResumeSession(params: {
         AND NOT EXISTS (SELECT 1 FROM workout_logs l WHERE l.session_id = s.id)
     `,
     sql`
-      SELECT id, plan_name
+      SELECT id, plan_name, to_char(started_on, 'YYYY-MM-DD') AS started_on
       FROM workout_sessions
       WHERE workout_id = ${workoutId} AND user_id = ${userId} AND completed_at IS NULL
       LIMIT 1
@@ -79,7 +90,9 @@ export async function startOrResumeSession(params: {
   ]);
 
   const row = (results[results.length - 1] as Record<string, unknown>[])[0];
-  return row ? { id: Number(row.id), plan_name: String(row.plan_name) } : null;
+  return row
+    ? { id: Number(row.id), plan_name: String(row.plan_name), started_on: String(row.started_on) }
+    : null;
 }
 
 /**
@@ -97,6 +110,7 @@ export async function getSessionLogs(params: {
     SELECT
       wl.id,
       wl.exercise_name,
+      COALESCE(wl.order_index, -1) AS order_index,
       wl.set_number,
       wl.target_reps,
       COALESCE(wl.rest_seconds, 90) AS rest_seconds,
@@ -128,6 +142,7 @@ export async function getSessionLogs(params: {
   return rows.map((l) => ({
     id: Number(l.id),
     exercise_name: String(l.exercise_name),
+    order_index: Number(l.order_index),
     set_number: Number(l.set_number),
     target_reps: l.target_reps == null ? null : Number(l.target_reps),
     rest_seconds: Number(l.rest_seconds),
@@ -137,4 +152,26 @@ export async function getSessionLogs(params: {
     last_weight: convertWeight(l.last_weight, l.last_unit, unit),
     last_reps: l.last_reps == null ? null : Number(l.last_reps),
   }));
+}
+
+/** An open session by id (used when resuming the active workout). */
+export async function getOpenSession(
+  userId: string,
+  sessionId: number
+): Promise<{ id: number; plan_name: string; plan_id: number | null; started_on: string } | null> {
+  const rows = await sql`
+    SELECT id, plan_name, plan_id, to_char(started_on, 'YYYY-MM-DD') AS started_on
+    FROM workout_sessions
+    WHERE id = ${sessionId} AND user_id = ${userId} AND completed_at IS NULL
+    LIMIT 1
+  `;
+  const row = rows[0];
+  return row
+    ? {
+        id: Number(row.id),
+        plan_name: String(row.plan_name),
+        plan_id: row.plan_id == null ? null : Number(row.plan_id),
+        started_on: String(row.started_on),
+      }
+    : null;
 }
