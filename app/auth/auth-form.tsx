@@ -12,10 +12,12 @@ import {
   row,
   value,
   hint,
+  segment,
   toggleBadge,
 } from "@/components/ui";
 import { str } from "@/lib/strings";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-rules";
+import { bodyWeightRange, parseBodyWeight, type WeightUnit } from "@/lib/units";
 import { loginUser, registerAndOnboard, checkUsernameAvailable } from "./actions";
 import { clearPageCaches } from "@/components/pwa";
 
@@ -40,6 +42,8 @@ export function AuthForm() {
     email: "",
     password: "",
     age: 24,
+    body_weight: "",
+    weight_unit: "kg" as WeightUnit,
     notify_workout_reminders: false,
     notify_rest_day_alerts: false,
   });
@@ -116,6 +120,11 @@ export function AuthForm() {
     if (step === 2) {
       if (!formData.name || !formData.username) {
         setErrorMessage(str.auth.enterNameAndUsername);
+        return;
+      }
+      if (formData.body_weight.trim() && parseBodyWeight(formData.body_weight, formData.weight_unit) === null) {
+        const { min, max } = bodyWeightRange(formData.weight_unit);
+        setErrorMessage(str.auth.weightInvalid(min, max, formData.weight_unit));
         return;
       }
       startTransition(async () => {
@@ -292,6 +301,51 @@ export function AuthForm() {
                         className={input}
                       />
                     </label>
+                  </div>
+
+                  <div className={s.tight}>
+                    <label htmlFor="onboarding-weight" className={`${label} flex items-baseline justify-between`}>
+                      <span>{str.auth.bodyWeight}</span>
+                      <span className="text-[#71717a] normal-case tracking-normal font-normal">
+                        {str.auth.bodyWeightOptional}
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <input
+                        id="onboarding-weight"
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        placeholder={str.auth.bodyWeightPlaceholder(formData.weight_unit)}
+                        value={formData.body_weight}
+                        onChange={(e) => {
+                          setFormData({ ...formData, body_weight: e.target.value });
+                          if (errorMessage) setErrorMessage(null);
+                        }}
+                        className={input}
+                      />
+                      <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label={str.auth.weightUnit}>
+                        {(["kg", "lbs"] as const).map((unit) => {
+                          const active = formData.weight_unit === unit;
+                          return (
+                            <button
+                              key={unit}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              onClick={() => setFormData({ ...formData, weight_unit: unit })}
+                              className={`${segment} min-w-12 px-3 ${
+                                active
+                                  ? "bg-[#baa3d0] text-[#141416]"
+                                  : "bg-[#141416] border border-white/[0.08] text-[#baa3d0]"
+                              }`}
+                            >
+                              {unit}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

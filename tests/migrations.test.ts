@@ -101,4 +101,26 @@ describe("migrations", () => {
     expect(byId.none).toBeNull();
     expect(byId.hashed).toBe(existing); // already-hashed rows are untouched
   });
+
+  it("0008 backfills the profile body weight from the latest weight log", async () => {
+    const db = newDb();
+    const files = migrationFiles();
+    const upTo = files.findIndex((f) => f.startsWith("0008"));
+    for (const file of files.slice(0, upTo)) await db.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
+    await db.exec(`
+      INSERT INTO user_profiles (user_id, username) VALUES ('a', 'a'), ('b', 'b');
+      INSERT INTO metrics (user_id, type, value, unit, recorded_at) VALUES
+        ('a', 'weight', 80, 'kg', '2026-10-01'),
+        ('a', 'weight', 176, 'lbs', '2026-10-05');
+    `);
+    await applyMigrations(db, files.slice(upTo));
+    await applyMigrations(db, files.slice(upTo));
+    const rows = await db.query<{ user_id: string; w: number | null; u: string | null }>(
+      `SELECT user_id, body_weight::float AS w, body_weight_unit AS u FROM user_profiles ORDER BY user_id`
+    );
+    expect(rows.rows).toEqual([
+      { user_id: "a", w: 176, u: "lbs" },
+      { user_id: "b", w: null, u: null },
+    ]);
+  });
 });

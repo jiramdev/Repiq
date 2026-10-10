@@ -6,7 +6,8 @@ import { sql } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { workoutLockError } from "@/lib/active-workout";
 import { getUserPrefs } from "@/lib/user";
-import { LIMITS, toNumberInRange } from "@/lib/validation";
+import { parseBodyWeight } from "@/lib/units";
+import { bodyWeightQueries } from "@/lib/body-weight";
 
 /** Log body weight in the user's current unit (stored with that unit). */
 export async function logWeight(weightValue: number): Promise<{ success: boolean; error?: string }> {
@@ -15,15 +16,11 @@ export async function logWeight(weightValue: number): Promise<{ success: boolean
   if (locked) return { success: false, error: locked };
   const { unit } = await getUserPrefs(userId);
 
-  const max = unit === "lbs" ? LIMITS.bodyWeight.max * 2.2 : LIMITS.bodyWeight.max;
-  const min = unit === "lbs" ? LIMITS.bodyWeight.min * 2.2 : LIMITS.bodyWeight.min;
-  const weight = toNumberInRange(weightValue, min, max);
+  const weight = parseBodyWeight(weightValue, unit);
   if (weight === null) return { success: false };
 
-  await sql`
-    INSERT INTO metrics (user_id, type, value, unit, recorded_at)
-    VALUES (${userId}, 'weight', ${Math.round(weight * 10) / 10}, ${unit}, now())
-  `;
+  // Logged in metrics and mirrored on the profile (Account details).
+  await sql.transaction(bodyWeightQueries(userId, weight, unit));
 
   revalidatePath("/", "page");
   revalidatePath("/statistics", "page");

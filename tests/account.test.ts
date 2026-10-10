@@ -72,6 +72,17 @@ describe("account details", () => {
     });
   });
 
+  it("changing body weight in account details also logs it", async () => {
+    expect(await account.updateAccountDetails({ ...details, body_weight: "82.4" })).toEqual({ success: true });
+    expect(await account.updateAccountDetails({ ...details, body_weight: 82.4 })).toEqual({ success: true }); // unchanged
+    expect(await account.updateAccountDetails({ ...details, body_weight: "" })).toEqual({ success: true }); // kept
+    const metrics = await holder.sql!`SELECT value::float AS value, unit FROM metrics`;
+    expect(metrics).toEqual([{ value: 82.4, unit: "kg" }]);
+    const [p] = await holder.sql!`SELECT body_weight::float AS w FROM user_profiles WHERE user_id = 'alice'`;
+    expect(p.w).toBe(82.4);
+    expect((await account.updateAccountDetails({ ...details, body_weight: "1000" })).success).toBe(false);
+  });
+
   it("validates input on the server", async () => {
     expect((await account.updateAccountDetails({ ...details, age: 7 })).success).toBe(false);
     expect((await account.updateAccountDetails({ ...details, username: "No Spaces" })).success).toBe(false);
@@ -86,6 +97,8 @@ describe("statistics", () => {
     await account.setUnitSystem("lbs");
     expect(await logWeight(180)).toEqual({ success: true });
     const rows = await holder.sql!`SELECT value::float AS value, unit FROM metrics ORDER BY id`;
+    const [p] = await holder.sql!`SELECT body_weight::float AS w, body_weight_unit AS u FROM user_profiles WHERE user_id = 'alice'`;
+    expect(p).toEqual({ w: 180, u: "lbs" }); // mirrored on the profile
     expect(rows).toEqual([
       { value: 80.3, unit: "kg" },
       { value: 180, unit: "lbs" },

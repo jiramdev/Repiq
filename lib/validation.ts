@@ -49,7 +49,8 @@ export const LIMITS = {
   timerSeconds: { min: 5, max: 1800 },
   weight: { min: 0, max: 2000 },
   loggedReps: { min: 0, max: 1000 },
-  bodyWeight: { min: 20, max: 700 },
+  /** Body weight in kg; the lbs range is derived from it (see lib/units.ts). */
+  bodyWeight: { min: 25, max: 400 },
   age: { min: 13, max: 120 },
   planTitle: 60,
   exerciseName: 80,

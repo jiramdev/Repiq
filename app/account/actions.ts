@@ -16,7 +16,8 @@ import {
   normalizeUsername,
   toIntInRange,
 } from "@/lib/validation";
-import { normalizeUnit, type WeightUnit } from "@/lib/units";
+import { bodyWeightRange, convertWeight, normalizeUnit, parseBodyWeight, type WeightUnit } from "@/lib/units";
+import { bodyWeightQueries } from "@/lib/body-weight";
 import { str } from "@/lib/strings";
 
 type Result = { success: boolean; error?: string };
@@ -49,6 +50,8 @@ export async function updateAccountDetails(formData: {
   age: number;
   email: string;
   username: string;
+  /** In the account's unit. Empty or omitted keeps the current value. */
+  body_weight?: number | string | null;
   /** Required when the email address changes. */
   currentPassword?: string;
 }): Promise<Result> {
@@ -67,8 +70,24 @@ export async function updateAccountDetails(formData: {
   // Changing the sign-in email needs the current password, so a briefly
   // unattended phone can't be used to take the account over.
   const current = await sql`
-    SELECT lower(trim(email)) AS email, password_hash FROM user_profiles WHERE user_id = ${userId} LIMIT 1
+    SELECT lower(trim(email)) AS email, password_hash, unit_system,
+           body_weight::float AS body_weight, body_weight_unit
+    FROM user_profiles WHERE user_id = ${userId} LIMIT 1
   `;
+
+  const unit = normalizeUnit(current[0]?.unit_system);
+  const weightGiven = formData?.body_weight != null && String(formData.body_weight).trim() !== "";
+  const bodyWeight = weightGiven ? parseBodyWeight(formData.body_weight, unit) : null;
+  if (weightGiven && bodyWeight === null) {
+    const { min, max } = bodyWeightRange(unit);
+    return { success: false, error: str.auth.weightInvalid(min, max, unit) };
+  }
+  const currentWeight = convertWeight(
+    current[0]?.body_weight as number | null,
+    current[0]?.body_weight_unit as string | null,
+    unit
+  );
+  const weightChanged = bodyWeight !== null && bodyWeight !== currentWeight;
   if (current[0] && current[0].email !== email) {
     if (!formData?.currentPassword?.trim()) {
       return { success: false, error: str.account.emailNeedsPassword };
@@ -103,6 +122,8 @@ export async function updateAccountDetails(formData: {
         WHERE user_id = ${userId}
       `,
       sql`UPDATE users SET email = ${email}, name = ${name} WHERE id = ${userId}`,
+      // A new weight is also logged, so Statistics shows it.
+      ...(weightChanged ? bodyWeightQueries(userId, bodyWeight, unit) : []),
     ]);
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -117,6 +138,10 @@ export async function updateAccountDetails(formData: {
   }
 
   revalidatePath("/account", "page");
+  if (weightChanged) {
+    revalidatePath("/", "page");
+    revalidatePath("/statistics", "page");
+  }
   return { success: true };
 }
 

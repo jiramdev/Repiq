@@ -1,4 +1,6 @@
 // lib/units.ts
+import { LIMITS } from "@/lib/validation";
+
 export type WeightUnit = "kg" | "lbs";
 
 export const KG_PER_LB = 0.45359237;
@@ -26,4 +28,28 @@ export function convertWeight(
 export function formatWeight(value: number | null | undefined, unit: WeightUnit): string {
   if (value == null) return "—";
   return `${Number.isInteger(value) ? value : value.toFixed(1)} ${unit}`;
+}
+
+/** Allowed body weight range in a unit (25–400 kg, about 55–882 lbs). */
+export function bodyWeightRange(unit: WeightUnit): { min: number; max: number } {
+  const KG = LIMITS.bodyWeight;
+  if (unit === "kg") return { min: KG.min, max: KG.max };
+  return { min: Math.ceil(KG.min / KG_PER_LB), max: Math.floor(KG.max / KG_PER_LB) };
+}
+
+/**
+ * A body weight entered in `unit`, rounded to 0.1, or null when it isn't a
+ * number in the allowed range. Accepts numbers and numeric strings ("78,5").
+ */
+export function parseBodyWeight(value: unknown, unit: WeightUnit): number | null {
+  const n =
+    typeof value === "string" && value.trim() !== ""
+      ? Number(value.replace(",", ".").trim())
+      : typeof value === "number"
+        ? value
+        : NaN;
+  if (!Number.isFinite(n)) return null;
+  const { min, max } = bodyWeightRange(unit);
+  if (n < min || n > max) return null;
+  return Math.round(n * 10) / 10;
 }

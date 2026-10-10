@@ -52,6 +52,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
     age: profile.age ?? 0,
     email: profile.email,
     username: profile.username,
+    body_weight: profile.body_weight != null ? String(profile.body_weight) : "",
   };
   const [formData, setFormData] = useState(initialForm);
 
@@ -259,6 +260,25 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
                 }}
                 className={`${inlineInput} flex-1 min-w-0 truncate`}
               />
+            </label>
+
+            <label className={rowClass}>
+              <span className={value}>{str.account.bodyWeight}</span>
+              <span className="flex items-center gap-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="—"
+                  value={formData.body_weight}
+                  onChange={(e) => {
+                    setFormData({ ...formData, body_weight: e.target.value });
+                    setAccountError(null);
+                  }}
+                  className={`${inlineInput} w-20`}
+                />
+                <span className={bodyText}>{profile.unit_system}</span>
+              </span>
             </label>
 
             {emailChanged && (

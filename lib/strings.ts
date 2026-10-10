@@ -165,6 +165,7 @@ export const str = {
     signOut: "Sign Out",
     timezone: "Timezone",
     emailNeedsPassword: "Enter your current password to change your email.",
+    bodyWeight: "Body weight",
   },
   auth: {
     signIn: "Sign In",
@@ -206,6 +207,12 @@ export const str = {
     emailInvalid: "Please enter a valid email address.",
     emailTaken: "Email is already registered.",
     ageInvalid: "Please enter an age between 13 and 120.",
+    bodyWeight: "Body Weight",
+    bodyWeightOptional: "optional",
+    bodyWeightPlaceholder: (unit: string) => (unit === "lbs" ? "e.g. 173" : "e.g. 78.5"),
+    weightUnit: "Weight unit",
+    weightInvalid: (min: number, max: number, unit: string) =>
+      `Please enter a body weight between ${min} and ${max} ${unit}.`,
     passwordMismatch: "Current password does not match.",
   },
   pwa: {

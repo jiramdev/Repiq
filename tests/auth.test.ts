@@ -173,6 +173,31 @@ describe("registration", () => {
     expect(days).toHaveLength(7);
   });
 
+  it("stores the body weight from sign-up in the profile and as the first weight log entry", async () => {
+    expect(await registerAndOnboard({ ...base, body_weight: "171,5", weight_unit: "lbs" })).toEqual({ success: true });
+    const userId = (await getSessionUserId())!;
+    const [profile] = await holder.sql!`
+      SELECT unit_system, body_weight::float AS body_weight, body_weight_unit FROM user_profiles WHERE user_id = ${userId}
+    `;
+    expect(profile).toEqual({ unit_system: "lbs", body_weight: 171.5, body_weight_unit: "lbs" });
+    const metrics = await holder.sql!`SELECT type, value::float AS value, unit FROM metrics WHERE user_id = ${userId}`;
+    expect(metrics).toEqual([{ type: "weight", value: 171.5, unit: "lbs" }]);
+  });
+
+  it("body weight is optional, but validated when given", async () => {
+    expect(await registerAndOnboard({ ...base, body_weight: "9", weight_unit: "kg" })).toEqual({
+      success: false,
+      error: "Please enter a body weight between 25 and 400 kg.",
+    });
+    expect((await registerAndOnboard({ ...base, body_weight: "abc" })).success).toBe(false);
+    expect(await holder.sql!`SELECT id FROM users`).toHaveLength(0);
+
+    expect(await registerAndOnboard({ ...base, body_weight: "" })).toEqual({ success: true });
+    expect(await holder.sql!`SELECT 1 FROM metrics`).toHaveLength(0);
+    const [p] = await holder.sql!`SELECT unit_system, body_weight FROM user_profiles`;
+    expect(p).toEqual({ unit_system: "kg", body_weight: null });
+  });
+
   it("enforces the minimum password length on the server", async () => {
     expect(await registerAndOnboard({ ...base, password: "1234567" })).toMatchObject({ success: false });
     const users = await holder.sql!`SELECT id FROM users`;

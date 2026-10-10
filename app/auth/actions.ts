@@ -20,6 +20,7 @@ import {
   toIntInRange,
 } from "@/lib/validation";
 import { str } from "@/lib/strings";
+import { bodyWeightRange, normalizeUnit, parseBodyWeight } from "@/lib/units";
 
 type Result = { success: boolean; error?: string };
 
@@ -127,6 +128,9 @@ export async function registerAndOnboard(data: {
   email: string;
   password: string;
   age: number;
+  /** Optional. In `weight_unit`, which also becomes the account's unit. */
+  body_weight?: number | string | null;
+  weight_unit?: string;
   notify_workout_reminders: boolean;
   notify_rest_day_alerts: boolean;
   timeZone?: string;
@@ -145,6 +149,15 @@ export async function registerAndOnboard(data: {
     return { success: false, error: str.auth.emailInvalid };
   }
   if (age === null) return { success: false, error: str.auth.ageInvalid };
+
+  const unit = normalizeUnit(data?.weight_unit);
+  const weightGiven = data?.body_weight != null && String(data.body_weight).trim() !== "";
+  const bodyWeight = weightGiven ? parseBodyWeight(data.body_weight, unit) : null;
+  if (weightGiven && bodyWeight === null) {
+    const { min, max } = bodyWeightRange(unit);
+    return { success: false, error: str.auth.weightInvalid(min, max, unit) };
+  }
+
   const passwordError = validateNewPassword(data.password);
   if (passwordError) return { success: false, error: passwordError };
 
@@ -171,7 +184,8 @@ export async function registerAndOnboard(data: {
 
     const passwordHash = await hashPassword(data.password);
 
-    // One transaction: either the user, profile and 7-day schedule all exist, or none do.
+    // One transaction: either the user, profile, 7-day schedule and first
+    // weight entry all exist, or none do.
     await sql.transaction([
       sql`
         INSERT INTO users (id, email, name)
@@ -180,10 +194,12 @@ export async function registerAndOnboard(data: {
       sql`
         INSERT INTO user_profiles (
           user_id, name, username, email, age, password_hash, unit_system,
-          timezone, notify_workout_reminders, notify_rest_day_alerts
+          timezone, notify_workout_reminders, notify_rest_day_alerts,
+          body_weight, body_weight_unit
         ) VALUES (
-          ${userId}, ${name}, ${username}, ${email}, ${age}, ${passwordHash}, 'kg',
-          ${timeZone}, ${Boolean(data.notify_workout_reminders)}, ${Boolean(data.notify_rest_day_alerts)}
+          ${userId}, ${name}, ${username}, ${email}, ${age}, ${passwordHash}, ${unit},
+          ${timeZone}, ${Boolean(data.notify_workout_reminders)}, ${Boolean(data.notify_rest_day_alerts)},
+          ${bodyWeight}, ${bodyWeight === null ? null : unit}
         )
       `,
       sql`
@@ -191,6 +207,14 @@ export async function registerAndOnboard(data: {
         SELECT ${userId}, 'Rest', d, 0, false
         FROM unnest(${[...DAY_LABELS]}::text[]) AS d
       `,
+      ...(bodyWeight === null
+        ? []
+        : [
+            sql`
+              INSERT INTO metrics (user_id, type, value, unit, recorded_at)
+              VALUES (${userId}, 'weight', ${bodyWeight}, ${unit}, now())
+            `,
+          ]),
     ]);
   } catch (err) {
     if (isUniqueViolation(err)) {
