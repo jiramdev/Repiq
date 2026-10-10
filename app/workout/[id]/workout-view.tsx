@@ -3,10 +3,10 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Play, Square } from "lucide-react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Header,
+  CloseButton,
   Section,
   Action,
   card,
@@ -27,7 +27,7 @@ import {
 } from "@/components/ui";
 import { str } from "@/lib/strings";
 import type { WeightUnit } from "@/lib/units";
-import { durationInputValue, formatDuration, parseDuration } from "@/lib/exercise-types";
+import { durationInputValue, parseDuration } from "@/lib/exercise-types";
 import { useSetSaver, type SaveStatus } from "@/lib/client/use-set-saver";
 import { useRestTimer } from "@/lib/client/use-rest-timer";
 import { useWakeLock } from "@/lib/client/use-wake-lock";
@@ -40,6 +40,23 @@ import { completeWorkout, discardWorkout } from "./actions";
 type Draft = { weight?: string; reps?: string; time?: string };
 
 type Hold = { logId: number; startedAt: number };
+
+/** Rejects when `promise` takes longer than `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = window.setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then(
+      (v) => {
+        window.clearTimeout(id);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(id);
+        reject(e);
+      }
+    );
+  });
+}
 
 /** Wall clock for the hold timer (only read in event handlers and intervals). */
 const clock = () => Date.now();
@@ -127,7 +144,6 @@ export function WorkoutView({
   unit: WeightUnit;
   allowRestNotification?: boolean;
 }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   // Full-screen loading screen while leaving after Finish/Discard.
   const [leaving, setLeaving] = useState(false);
@@ -136,6 +152,8 @@ export function WorkoutView({
   const [currentStep, setCurrentStep] = useState(0);
   const [finishError, setFinishError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  /** Edits that couldn't be saved when Finish was tapped (offers "Finish anyway"). */
+  const [unsaved, setUnsaved] = useState(0);
   const pushReady = useRef(false);
 
   // Remember the active workout on this device (for the offline/back-button
@@ -261,60 +279,107 @@ export function WorkoutView({
     await startRest(log);
   };
 
-  const handleFinish = () => {
+  // Leaving must always work. Try the server action; if it fails (offline
+  // blip, a deploy that changed the action ids, a server error), fall back to
+  // the plain POST route. Then leave with a full page load, so no router
+  // cache, refresh or stale client state can bring the workout back.
+  const runLeave = async (kind: "finish" | "discard"): Promise<boolean> => {
+    try {
+      const res = await withTimeout(
+        kind === "finish" ? completeWorkout(workout.id) : discardWorkout(workout.id),
+        10_000
+      );
+      if (res?.ok) return true;
+    } catch {
+      // fall through to the route
+    }
+    try {
+      const res = await withTimeout(
+        fetch(`/api/workout/${workout.id}/${kind}`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+        }),
+        10_000
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const leave = () => {
+    timer.stop();
+    saver.forget();
+    setActiveWorkoutMarker(null);
+    setLeaving(true);
+    window.location.replace("/");
+  };
+
+  const handleFinish = (force = false) => {
     setFinishError(null);
+    setUnsaved(0);
     startTransition(async () => {
-      // Every set must be on the server before the workout can be finished.
-      const saved = await saver.flushNow();
-      if (!saved) {
-        setFinishError(str.workout.unsavedBeforeFinish);
-        return;
+      if (!force) {
+        // Try to get every set on the server first, but never wait forever.
+        const saved = await saver.flushNow(8000);
+        if (!saved) {
+          setUnsaved(Math.max(1, saver.unsavedCount()));
+          return;
+        }
       }
-      try {
-        await completeWorkout(workout.id);
-        timer.stop();
-        saver.forget();
-        setActiveWorkoutMarker(null);
-        setLeaving(true);
-        router.replace("/");
-      } catch {
-        setFinishError(str.common.genericError);
-      }
+      if (await runLeave("finish")) leave();
+      else setFinishError(str.workout.actionFailed);
     });
   };
 
   const handleDiscard = () => {
-    if (!confirmDiscard) {
-      setConfirmDiscard(true);
-      window.setTimeout(() => setConfirmDiscard(false), 4000);
-      return;
-    }
+    setConfirmDiscard(false);
     setFinishError(null);
     startTransition(async () => {
-      try {
-        await discardWorkout(workout.id);
-      } catch {
-        setFinishError(str.common.genericError);
-        return;
-      }
-      timer.stop();
-      saver.forget();
-      setActiveWorkoutMarker(null);
-      setLeaving(true);
-      router.replace("/");
+      if (await runLeave("discard")) leave();
+      else setFinishError(str.workout.actionFailed);
     });
   };
 
-  const discardButton = (
-    <button
-      type="button"
+  const closeButton = (
+    <CloseButton
+      label={str.workout.discardTitle}
       disabled={isPending}
-      onClick={handleDiscard}
-      className={`w-full min-h-11 ${meta} ${confirmDiscard ? "text-white" : ""} disabled:opacity-50`}
-    >
-      {confirmDiscard ? str.workout.discardConfirm : str.workout.discard}
-    </button>
+      onClick={() => setConfirmDiscard(true)}
+    />
   );
+
+  // Confirm step for the X: in the page, not window.confirm (which some
+  // installed-app webviews silently suppress).
+  const discardConfirm = confirmDiscard ? (
+    <section className={`${card} ${s.tight}`} role="alertdialog" aria-label={str.workout.discardTitle}>
+      <p className={hint}>{str.workout.discardQuestion}</p>
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <Action variant="secondary" type="button" onClick={() => setConfirmDiscard(false)}>
+          {str.common.cancel}
+        </Action>
+        <Action variant="primary" type="button" disabled={isPending} onClick={handleDiscard}>
+          {str.workout.discardConfirm}
+        </Action>
+      </div>
+    </section>
+  ) : null;
+
+  const finishProblem =
+    unsaved > 0 ? (
+      <section className={`${card} ${s.tight}`} role="alert">
+        <p className={hint}>{str.workout.finishAnywayHint(unsaved)}</p>
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <Action variant="secondary" type="button" disabled={isPending} onClick={() => handleFinish(false)}>
+            {str.workout.tryAgain}
+          </Action>
+          <Action variant="primary" type="button" disabled={isPending} onClick={() => handleFinish(true)}>
+            {str.workout.finishAnyway}
+          </Action>
+        </div>
+      </section>
+    ) : null;
 
   const staleNotice = workout.stale ? (
     <p className={`${card} ${hint}`} role="note">
@@ -330,12 +395,12 @@ export function WorkoutView({
     return (
       <div className="min-h-[100dvh] p-4 max-w-sm mx-auto">
         <main className={`w-full ${s.stack}`}>
-          <Header title={workout.name} />
+          <Header title={workout.name}>{closeButton}</Header>
+          {discardConfirm}
           {staleNotice}
           <section className={card}>
             <p className={hint}>{str.workout.emptySession}</p>
             {finishError && <p className={`${errorText} px-1`} role="alert">{finishError}</p>}
-            {discardButton}
           </section>
         </main>
       </div>
@@ -343,29 +408,15 @@ export function WorkoutView({
   }
 
   const type = currentExercise.sets[0]?.exercise_type ?? "weighted";
-  const prevWeight = currentExercise.sets.find((x) => x.last_weight != null)?.last_weight;
-  const prevReps = currentExercise.sets.find((x) => x.last_reps != null)?.last_reps;
-  const prevSeconds = currentExercise.sets.find((x) => x.last_seconds != null)?.last_seconds;
-  const prevText =
-    type === "static"
-      ? prevSeconds != null
-        ? str.workout.prev(formatDuration(prevSeconds))
-        : null
-      : type === "bodyweight"
-        ? prevReps != null
-          ? str.workout.prevReps(prevReps)
-          : null
-        : prevWeight != null
-          ? str.workout.prev(`${prevWeight} ${unit}`)
-          : null;
-
   return (
     <div className="min-h-[100dvh] p-4 flex flex-col justify-between max-w-sm mx-auto select-none pb-[calc(1.5rem+env(safe-area-inset-bottom,16px))]">
       <main className={`w-full ${s.stack}`}>
         <Header title={workout.name}>
           <SaveIndicator status={saver.status} onRetry={() => void saver.retryNow()} />
+          {closeButton}
         </Header>
 
+        {discardConfirm}
         {staleNotice}
 
         {timer.remaining !== null && (
@@ -403,11 +454,7 @@ export function WorkoutView({
 
         <Section
           label={<span className={display}>{currentExercise.name}</span>}
-          meta={
-            prevText
-              ? `${prevText} · ${str.workout.progress(step + 1, exercises.length)}`
-              : str.workout.progress(step + 1, exercises.length)
-          }
+          meta={str.workout.progress(step + 1, exercises.length)}
         >
           <div className="grid grid-cols-12 gap-2 text-center items-center px-2 pt-1">
             <span className={`${label} col-span-2 text-left`}>{str.workout.set}</span>
@@ -545,6 +592,7 @@ export function WorkoutView({
       </main>
 
       <div className={`pt-4 ${s.tight}`}>
+        {finishProblem}
         {finishError && <p className={`${errorText} px-1`} role="alert">{finishError}</p>}
         <div className={!isFirstExercise ? "grid grid-cols-2 gap-2" : ""}>
           {!isFirstExercise && (
@@ -554,7 +602,7 @@ export function WorkoutView({
           )}
 
           {isLastExercise ? (
-            <Action variant="primary" type="button" disabled={isPending} onClick={handleFinish}>
+            <Action variant="secondary" type="button" disabled={isPending} onClick={() => handleFinish(false)}>
               {isPending ? str.workout.finishing : str.workout.finish}
             </Action>
           ) : (
@@ -563,7 +611,6 @@ export function WorkoutView({
             </Action>
           )}
         </div>
-        {discardButton}
       </div>
     </div>
   );
