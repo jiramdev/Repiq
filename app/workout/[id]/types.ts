@@ -1,4 +1,5 @@
 // app/workout/[id]/types.ts
+import type { ExerciseType } from "@/lib/exercise-types";
 export interface WorkoutDetail {
   id: number;
   sessionId: number;
@@ -23,7 +24,13 @@ export interface WorkoutLog {
   rest_seconds: number;
   actual_weight: number | null;
   actual_reps: number | null;
+  /** weighted: weight + reps; bodyweight: reps; static: duration_seconds. */
+  exercise_type: ExerciseType;
+  /** static: target hold in seconds. */
+  target_seconds: number | null;
+  duration_seconds: number | null;
   completed: boolean;
   last_weight: number | null;
   last_reps: number | null;
+  last_seconds: number | null;
 }

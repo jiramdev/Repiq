@@ -132,7 +132,7 @@ describe("workout sets", () => {
 
 describe("plans", () => {
   it("editing an exercise changes one row in one plan and never the shared library", async () => {
-    const res = await planActions.updatePlanExercise(10, 100, "Bench Press", 5, 5, 180);
+    const res = await planActions.updatePlanExercise(10, 100, { name: "Bench Press", type: "weighted", sets: 5, reps: 5, rest: 180 });
     expect(res).toEqual({ success: true });
 
     const rows = await holder.sql!`SELECT id, sets, reps, rest_seconds, exercise_id FROM plan_exercises ORDER BY id`;
@@ -151,8 +151,8 @@ describe("plans", () => {
 
   it("can't touch another user's plan", async () => {
     current.userId = "bob";
-    expect(await planActions.updatePlanExercise(10, 100, "Hacked", 1, 1, 0)).toEqual({ success: false });
-    expect(await planActions.addExerciseToPlan(10, "Hacked", 1, 1, 0)).toEqual({ success: false });
+    expect(await planActions.updatePlanExercise(10, 100, { name: "Hacked", type: "weighted", sets: 1, reps: 1, rest: 0 })).toEqual({ success: false });
+    expect(await planActions.addExerciseToPlan(10, { name: "Hacked", type: "weighted", sets: 1, reps: 1, rest: 0 })).toEqual({ success: false });
     await planActions.deleteExercise(10, 100);
     await planActions.updatePlanTitle(10, "Hacked");
     await expect(planActions.deletePlan(10)).rejects.toThrow("NEXT_REDIRECT /schedule");
