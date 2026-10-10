@@ -33,6 +33,7 @@ import {
 import { logoutUser } from "@/app/auth/actions";
 import { currentPushEndpoint, unsubscribePush } from "@/lib/client/push";
 import { reloadIfLocked } from "@/lib/client/locked";
+import { LoadingScreen } from "@/components/loading-screen";
 
 interface AccountStats {
   totalWorkouts: number;
@@ -44,6 +45,8 @@ const successText = "text-emerald-400 text-xs font-semibold px-1 pt-1";
 
 export function AccountView({ profile, stats }: { profile: UserProfile; stats: AccountStats }) {
   const [isPending, startTransition] = useTransition();
+  // Full-screen loading screen while signing out.
+  const [leaving, setLeaving] = useState(false);
 
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSuccess, setAccountSuccess] = useState(false);
@@ -177,10 +180,12 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
           setDangerError(res.error ?? str.common.genericError);
           return;
         }
+        setLeaving(true);
         await unsubscribePush();
         await clearAppCaches();
         window.location.replace("/auth");
       } catch {
+        setLeaving(false);
         setDangerError(str.common.genericError);
       }
     });
@@ -190,6 +195,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
 
   return (
     <div className="min-h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none pb-28">
+      {leaving && <LoadingScreen />}
       <main className={`max-w-sm mx-auto w-full ${s.stack}`}>
         <Header title={str.account.title} />
 

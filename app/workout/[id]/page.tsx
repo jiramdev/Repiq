@@ -1,5 +1,6 @@
 // app/workout/[id]/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
@@ -95,13 +96,7 @@ async function WorkoutLoader({ paramsPromise }: { paramsPromise: Promise<{ id: s
 
 export default function ActiveWorkoutPage({ params }: { params: Promise<{ id: string }> }) {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-[100dvh] bg-[#baa3d0] text-white p-4">
-          <div className="max-w-sm mx-auto h-48 rounded-2xl bg-white/[0.04] animate-pulse" />
-        </div>
-      }
-    >
+    <Suspense fallback={<LoadingScreen />}>
       <WorkoutLoader paramsPromise={params} />
     </Suspense>
   );

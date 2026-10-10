@@ -8,6 +8,7 @@ export const str = {
     description: "Minimalist workout tracker",
   },
   common: {
+    loading: "Loading",
     save: "Save",
     saving: "Saving…",
     cancel: "Cancel",

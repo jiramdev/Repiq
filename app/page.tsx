@@ -1,5 +1,6 @@
 // app/page.tsx
 import { Suspense } from "react";
+import { LoadingScreen } from "@/components/loading-screen";
 import Link from "next/link";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
@@ -122,17 +123,7 @@ export default function DashboardPage() {
       <main className={`w-full ${s.stack} pt-2`}>
         <Header title={str.dashboard.title} />
 
-        <Suspense
-          fallback={
-            <div className={`${s.stack} animate-pulse`}>
-              <div className={`${todayWidget} opacity-60 h-28`}></div>
-              <div className={`grid grid-cols-2 ${s.gap}`}>
-                <div className={`${card} aspect-square opacity-60`} />
-                <div className={`${card} aspect-square opacity-60`} />
-              </div>
-            </div>
-          }
-        >
+        <Suspense fallback={<LoadingScreen />}>
           <DashboardContent />
         </Suspense>
       </main>

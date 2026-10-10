@@ -6,6 +6,7 @@ import { BottomDock } from "@/components/bottom-dock";
 import { PwaManager } from "@/components/pwa";
 import { WorkoutLockGuard } from "@/components/workout-lock";
 import { THEME_COLOR } from "@/lib/theme";
+import { SPLASH_SCREENS, splashFile, splashMedia } from "@/lib/splash";
 import { str } from "@/lib/strings";
 import "./globals.css";
 
@@ -34,6 +35,9 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "black-translucent",
     title: str.app.name,
+    // iOS shows these while the installed app starts; they match the loading
+    // screen (scripts/generate-icons.mjs renders them).
+    startupImage: SPLASH_SCREENS.map((screen) => ({ url: splashFile(screen), media: splashMedia(screen) })),
   },
   formatDetection: { telephone: false },
 };

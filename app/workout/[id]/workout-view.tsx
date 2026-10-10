@@ -31,6 +31,7 @@ import { useRestTimer } from "@/lib/client/use-rest-timer";
 import { useWakeLock } from "@/lib/client/use-wake-lock";
 import { ensurePushSubscription } from "@/lib/client/push";
 import { setActiveWorkoutMarker } from "@/lib/client/active-workout-marker";
+import { LoadingScreen } from "@/components/loading-screen";
 import type { WorkoutDetail, WorkoutLog } from "./types";
 import { completeWorkout, discardWorkout } from "./actions";
 
@@ -121,6 +122,8 @@ export function WorkoutView({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  // Full-screen loading screen while leaving after Finish/Discard.
+  const [leaving, setLeaving] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>(initialLogs);
   const [drafts, setDrafts] = useState<Record<number, Draft>>({});
   const [currentStep, setCurrentStep] = useState(0);
@@ -222,6 +225,7 @@ export function WorkoutView({
         timer.stop();
         saver.forget();
         setActiveWorkoutMarker(null);
+        setLeaving(true);
         router.replace("/");
       } catch {
         setFinishError(str.common.genericError);
@@ -246,6 +250,7 @@ export function WorkoutView({
       timer.stop();
       saver.forget();
       setActiveWorkoutMarker(null);
+      setLeaving(true);
       router.replace("/");
     });
   };
@@ -266,6 +271,8 @@ export function WorkoutView({
       {str.workout.staleNotice(formatStartedOn(workout.startedOn))}
     </p>
   ) : null;
+
+  if (leaving) return <LoadingScreen />;
 
   if (!currentExercise) {
     // An open session without sets (e.g. its plan was emptied): the only way

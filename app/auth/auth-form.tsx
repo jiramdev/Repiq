@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import { str } from "@/lib/strings";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-rules";
+import { LoadingScreen } from "@/components/loading-screen";
 import { bodyWeightRange, parseBodyWeight, type WeightUnit } from "@/lib/units";
 import { loginUser, registerAndOnboard, checkUsernameAvailable } from "./actions";
 import { clearPageCaches } from "@/components/pwa";
@@ -53,7 +54,11 @@ export function AuthForm() {
     void clearPageCaches();
   }, []);
 
+  // Full-screen loading screen from a successful sign-in until the app loads.
+  const [leaving, setLeaving] = useState(false);
+
   const goHome = () => {
+    setLeaving(true);
     // Full navigation so the service worker and server components start fresh
     // with the new session cookie.
     window.location.replace("/");
@@ -169,6 +174,7 @@ export function AuthForm() {
 
   return (
     <div className="fixed inset-0 h-[100dvh] w-full bg-[#baa3d0] flex items-center justify-center p-4 overflow-y-auto">
+      {leaving && <LoadingScreen />}
       <div className="w-full max-w-sm space-y-3">
         <div className={`bg-[#141416] text-white rounded-3xl p-6 shadow-2xl border border-white/[0.08] ${s.stack}`}>
           <div className="flex items-center justify-between">
