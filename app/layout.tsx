@@ -4,6 +4,7 @@ import type { Metadata, Viewport } from "next";
 import { Anton, Inter } from "next/font/google";
 import { BottomDock } from "@/components/bottom-dock";
 import { PwaManager } from "@/components/pwa";
+import { WorkoutLockGuard } from "@/components/workout-lock";
 import { THEME_COLOR } from "@/lib/theme";
 import { str } from "@/lib/strings";
 import "./globals.css";
@@ -58,6 +59,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <BottomDock />
         </Suspense>
         <PwaManager />
+        {/* Reads the URL, so it streams in after the static shell. */}
+        <Suspense fallback={null}>
+          <WorkoutLockGuard />
+        </Suspense>
       </body>
     </html>
   );

@@ -18,6 +18,7 @@ import {
   error as errorText,
 } from "@/components/ui";
 import { str } from "@/lib/strings";
+import { reloadIfLocked } from "@/lib/client/locked";
 import {
   updatePlanTitle,
   addExerciseToPlan,
@@ -101,7 +102,7 @@ export function PlanEditor({
   const handleTitleBlur = () => {
     if (title.trim() && title !== plan.title) {
       startTransition(async () => {
-        await updatePlanTitle(plan.id, title);
+        reloadIfLocked(await updatePlanTitle(plan.id, title));
       });
     }
   };
@@ -165,7 +166,7 @@ export function PlanEditor({
       const parsedReps = parseInt(repsValue, 10) || 10;
       const parsedRest = Number.isFinite(parseInt(restSeconds, 10)) ? parseInt(restSeconds, 10) : 90;
 
-      let res: { success: boolean };
+      let res: { success: boolean; error?: string };
       if (editingExerciseId !== null) {
         res = await updatePlanExercise(
           plan.id,
@@ -184,6 +185,7 @@ export function PlanEditor({
           parsedRest
         );
       }
+      if (reloadIfLocked(res)) return;
       if (!res.success) {
         setFormError(str.plan.invalidInput);
         return;
@@ -194,7 +196,7 @@ export function PlanEditor({
 
   const handleDeleteExercise = (exerciseId: number) => {
     startTransition(async () => {
-      await deleteExercise(plan.id, exerciseId);
+      if (reloadIfLocked(await deleteExercise(plan.id, exerciseId))) return;
       if (editingExerciseId === exerciseId) {
         resetForm();
       }
@@ -208,7 +210,7 @@ export function PlanEditor({
       return;
     }
     startTransition(async () => {
-      await deletePlan(plan.id);
+      reloadIfLocked(await deletePlan(plan.id));
     });
   };
 

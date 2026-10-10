@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { PlanEditor } from "./plan-editor";
 
 interface Plan {
@@ -42,7 +42,7 @@ async function PlanLoader({
     notFound();
   }
 
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
 
   const [planResult, exercisesResult, libraryResult] = await Promise.all([
     sql`

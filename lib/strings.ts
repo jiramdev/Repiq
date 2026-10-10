@@ -35,7 +35,6 @@ export const str = {
     finished: "Finished",
     finishedHint: "Workout completed today",
     startAnother: "Start another session",
-    resume: "Resume workout",
     exercisesScheduled: (n: number) => `${n} ${n === 1 ? "exercise" : "exercises"} scheduled`,
     restDay: "Rest Day",
     nothingScheduled: "Nothing scheduled",
@@ -94,7 +93,6 @@ export const str = {
     restAddLabel: "Add 15 seconds",
     restSubtractLabel: "Remove 15 seconds",
     restSkipLabel: "Skip rest",
-    leave: "Leave workout",
     finish: "Finish Workout",
     finishing: "Saving…",
     discard: "Discard workout",
@@ -104,6 +102,10 @@ export const str = {
     weightFor: (n: number, unit: string) => `Set ${n} weight in ${unit}`,
     repsFor: (n: number) => `Set ${n} reps`,
     empty: "This plan has no exercises yet.",
+    emptySession: "This workout has no sets. Discard it to continue.",
+    backToDashboard: "Back to dashboard",
+    staleNotice: (date: string) =>
+      `This workout was started on ${date} and never finished. Finish it or discard it to continue.`,
     editPlan: "Edit plan",
     saveSaving: "Saving…",
     saveSaved: "Saved",
@@ -113,6 +115,7 @@ export const str = {
     unsavedBeforeFinish: "Some sets aren't saved yet. Check your connection and try again.",
     restNotificationTitle: "Rest complete",
     restNotificationBody: "Time for your next set.",
+    locked: "Finish or discard your active workout first.",
   },
   statistics: {
     title: "Statistics",
@@ -161,6 +164,7 @@ export const str = {
     resetHistoryConfirm: "Tap again to erase your history",
     signOut: "Sign Out",
     timezone: "Timezone",
+    emailNeedsPassword: "Enter your current password to change your email.",
   },
   auth: {
     signIn: "Sign In",

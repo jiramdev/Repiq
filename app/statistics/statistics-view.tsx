@@ -14,6 +14,7 @@ import {
   error as errorText,
 } from "@/components/ui";
 import { str } from "@/lib/strings";
+import { reloadIfLocked } from "@/lib/client/locked";
 import type { WeightUnit } from "@/lib/units";
 import { logWeight } from "./actions";
 
@@ -77,6 +78,7 @@ export function StatisticsView({
     startTransition(async () => {
       try {
         const res = await logWeight(val);
+        if (reloadIfLocked(res)) return;
         if (!res.success) throw new Error("rejected");
       } catch {
         setDisplayedWeight(previous);

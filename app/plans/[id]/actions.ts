@@ -5,9 +5,23 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sql } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { LIMITS, cleanText, toIntInRange } from "@/lib/validation";
+import { workoutLockError } from "@/lib/active-workout";
+import { LIMITS, cleanText, toId, toIntInRange } from "@/lib/validation";
 
 type Result = { success: boolean; error?: string };
+
+/**
+ * Common checks: signed in, not locked into an active workout, and valid ids.
+ * Returns the user id, or a Result to return straight away.
+ */
+async function guard(...ids: unknown[]): Promise<{ userId: string; ids: number[] } | Result> {
+  const userId = await requireUserId();
+  const locked = await workoutLockError(userId);
+  if (locked) return { success: false, error: locked };
+  const parsed = ids.map(toId);
+  if (parsed.some((id) => id === null)) return { success: false };
+  return { userId, ids: parsed as number[] };
+}
 
 function revalidatePlan(planId: number) {
   revalidatePath(`/plans/${planId}`);
@@ -86,8 +100,10 @@ async function recountExercises(userId: string, planId: number) {
   `;
 }
 
-export async function updatePlanTitle(planId: number, title: string): Promise<Result> {
-  const userId = await requireUserId();
+export async function updatePlanTitle(rawPlanId: number, title: string): Promise<Result> {
+  const g = await guard(rawPlanId);
+  if ("success" in g) return g;
+  const { userId, ids: [planId] } = g;
   const cleanTitle = cleanText(title, LIMITS.planTitle);
   if (!cleanTitle) return { success: false };
 
@@ -106,13 +122,15 @@ export async function updatePlanTitle(planId: number, title: string): Promise<Re
 }
 
 export async function addExerciseToPlan(
-  planId: number,
+  rawPlanId: number,
   exerciseName: string,
   sets: number,
   reps: number,
   restSeconds: number
 ): Promise<Result> {
-  const userId = await requireUserId();
+  const g = await guard(rawPlanId);
+  if ("success" in g) return g;
+  const { userId, ids: [planId] } = g;
   const input = parseExerciseInput(exerciseName, sets, reps, restSeconds);
   if (!input) return { success: false };
   if (!(await ownsPlan(userId, planId))) return { success: false };
@@ -132,14 +150,16 @@ export async function addExerciseToPlan(
 
 /** Changes exactly one exercise row in one of the user's plans. */
 export async function updatePlanExercise(
-  planId: number,
-  planExerciseId: number,
+  rawPlanId: number,
+  rawPlanExerciseId: number,
   exerciseName: string,
   sets: number,
   reps: number,
   restSeconds: number
 ): Promise<Result> {
-  const userId = await requireUserId();
+  const g = await guard(rawPlanId, rawPlanExerciseId);
+  if ("success" in g) return g;
+  const { userId, ids: [planId, planExerciseId] } = g;
   const input = parseExerciseInput(exerciseName, sets, reps, restSeconds);
   if (!input) return { success: false };
   if (!(await ownsPlan(userId, planId))) return { success: false };
@@ -164,8 +184,10 @@ export async function updatePlanExercise(
   return { success: true };
 }
 
-export async function deleteExercise(planId: number, planExerciseId: number): Promise<Result> {
-  const userId = await requireUserId();
+export async function deleteExercise(rawPlanId: number, rawPlanExerciseId: number): Promise<Result> {
+  const g = await guard(rawPlanId, rawPlanExerciseId);
+  if ("success" in g) return g;
+  const { userId, ids: [planId, planExerciseId] } = g;
 
   await sql`
     DELETE FROM plan_exercises pe
@@ -181,16 +203,25 @@ export async function deleteExercise(planId: number, planExerciseId: number): Pr
   return { success: true };
 }
 
-export async function deletePlan(planId: number) {
-  const userId = await requireUserId();
+export async function deletePlan(rawPlanId: number): Promise<Result> {
+  const g = await guard(rawPlanId);
+  if ("success" in g) return g;
+  const { userId, ids: [planId] } = g;
 
   if (await ownsPlan(userId, planId)) {
     await sql.transaction([
-      // Days that used this plan become rest days; open sessions for them end.
+      // Days that used this plan become rest days. Their unfinished sessions
+      // are removed only when nothing was logged in them; a session with
+      // logged sets is kept (it can still be finished or discarded).
       sql`
-        DELETE FROM workout_sessions
-        WHERE user_id = ${userId} AND completed_at IS NULL
-          AND workout_id IN (SELECT id FROM workouts WHERE user_id = ${userId} AND plan_id = ${planId})
+        DELETE FROM workout_sessions s
+        WHERE s.user_id = ${userId} AND s.completed_at IS NULL
+          AND s.workout_id IN (SELECT id FROM workouts WHERE user_id = ${userId} AND plan_id = ${planId})
+          AND NOT EXISTS (
+            SELECT 1 FROM workout_logs l
+            WHERE l.session_id = s.id
+              AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL)
+          )
       `,
       sql`
         UPDATE workouts

@@ -17,9 +17,13 @@ export function PwaManager() {
     if (!("serviceWorker" in navigator)) return;
     if (process.env.NODE_ENV !== "production") return;
 
+    // Only reload when an existing worker is replaced (an update the user
+    // accepted). The very first install also fires controllerchange (via
+    // clients.claim), and reloading then would only interrupt the first visit.
+    const hadController = Boolean(navigator.serviceWorker.controller);
     let refreshing = false;
     const onControllerChange = () => {
-      if (refreshing) return;
+      if (refreshing || !hadController) return;
       refreshing = true;
       window.location.reload();
     };
@@ -72,7 +76,29 @@ export function PwaManager() {
   );
 }
 
-/** Wipe cached pages (they contain the signed-in user's data), e.g. on sign-out. */
+/**
+ * Wipe cached pages (they contain the signed-in user's data). Runs whenever the
+ * sign-in page loads, so an expired session never leaves the previous user's
+ * pages behind for the next one. Unsent workout sets are kept: if a session
+ * expired mid-workout, they're re-sent after signing back in.
+ */
+export async function clearPageCaches(): Promise<void> {
+  try {
+    navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_CACHES" });
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k.startsWith("repiq-pages-") || k.startsWith("repiq-meta"))
+          .map((k) => caches.delete(k))
+      );
+    }
+  } catch {
+    // Best effort only.
+  }
+}
+
+/** Everything this app stored on the device, e.g. on an explicit sign-out. */
 export async function clearAppCaches(): Promise<void> {
   try {
     navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_CACHES" });

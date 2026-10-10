@@ -31,6 +31,8 @@ import {
   resetWorkoutHistory,
 } from "./actions";
 import { logoutUser } from "@/app/auth/actions";
+import { currentPushEndpoint, unsubscribePush } from "@/lib/client/push";
+import { reloadIfLocked } from "@/lib/client/locked";
 
 interface AccountStats {
   totalWorkouts: number;
@@ -59,6 +61,9 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [notifyError, setNotifyError] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [emailPassword, setEmailPassword] = useState("");
+  const [dangerError, setDangerError] = useState<string | null>(null);
+  const emailChanged = formData.email.trim().toLowerCase() !== profile.email.trim().toLowerCase();
 
   const handleNotifyToggle = async (
     key: "notify_workout_reminders" | "notify_rest_day_alerts",
@@ -79,7 +84,9 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
 
     startTransition(async () => {
       try {
-        await setNotification(key, nextVal);
+        const res = await setNotification(key, nextVal);
+        if (reloadIfLocked(res)) return;
+        if (!res.success) setNotifyError(res.error ?? str.common.genericError);
       } catch {
         setNotifyError(str.common.genericError);
       }
@@ -89,7 +96,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
   const handleUnit = (unit: WeightUnit) => {
     if (unit === profile.unit_system) return;
     startTransition(async () => {
-      await setUnitSystem(unit);
+      reloadIfLocked(await setUnitSystem(unit));
     });
   };
 
@@ -100,11 +107,16 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
 
     startTransition(async () => {
       try {
-        const res = await updateAccountDetails(formData);
+        const res = await updateAccountDetails({
+          ...formData,
+          currentPassword: emailChanged ? emailPassword : undefined,
+        });
+        if (reloadIfLocked(res)) return;
         if (!res.success) {
           setAccountError(res.error ?? str.common.genericError);
           return;
         }
+        setEmailPassword("");
         setAccountSuccess(true);
         setTimeout(() => setAccountSuccess(false), 2500);
       } catch {
@@ -124,6 +136,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
     startTransition(async () => {
       try {
         const res = await changePassword({ currentPassword, newPassword });
+        if (reloadIfLocked(res)) return;
         if (!res.success) {
           setPasswordError(res.error ?? str.common.genericError);
           return;
@@ -145,15 +158,30 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
       return;
     }
     setConfirmReset(false);
+    setDangerError(null);
     startTransition(async () => {
-      await resetWorkoutHistory();
+      const res = await resetWorkoutHistory();
+      if (reloadIfLocked(res)) return;
+      if (!res.success) setDangerError(res.error ?? str.common.genericError);
     });
   };
 
   const handleLogout = () => {
+    setDangerError(null);
     startTransition(async () => {
-      await clearAppCaches();
-      await logoutUser();
+      try {
+        const res = await logoutUser({ pushEndpoint: await currentPushEndpoint() });
+        if (reloadIfLocked(res)) return;
+        if (!res.success) {
+          setDangerError(res.error ?? str.common.genericError);
+          return;
+        }
+        await unsubscribePush();
+        await clearAppCaches();
+        window.location.replace("/auth");
+      } catch {
+        setDangerError(str.common.genericError);
+      }
     });
   };
 
@@ -233,6 +261,29 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
               />
             </label>
 
+            {emailChanged && (
+              <label className={rowClass}>
+                <span className={`${value} shrink-0`}>{str.account.currentPassword}</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  aria-describedby="email-password-hint"
+                  value={emailPassword}
+                  onChange={(e) => {
+                    setEmailPassword(e.target.value);
+                    setAccountError(null);
+                  }}
+                  className={`${inlineInput} flex-1 min-w-0 placeholder:text-white/30`}
+                />
+              </label>
+            )}
+            {emailChanged && (
+              <p id="email-password-hint" className="text-xs text-[#71717a] px-1">
+                {str.account.emailNeedsPassword}
+              </p>
+            )}
+
             {accountError && <p className={`${errorText} px-1 pt-1`} role="alert">{accountError}</p>}
             {accountSuccess && <p className={successText}>{str.account.detailsSaved}</p>}
 
@@ -246,6 +297,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
                 disabled={isPending}
                 onClick={() => {
                   setFormData(initialForm);
+                  setEmailPassword("");
                   setAccountError(null);
                   setAccountSuccess(false);
                 }}
@@ -404,6 +456,7 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
             >
               {str.account.signOut}
             </button>
+            {dangerError && <p className={`${errorText} px-1`} role="alert">{dangerError}</p>}
           </div>
         </Section>
       </main>

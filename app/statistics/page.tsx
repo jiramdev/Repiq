@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { getUserPrefs } from "@/lib/user";
 import { todayIn } from "@/lib/time";
 import { convertWeight } from "@/lib/units";
@@ -12,7 +12,7 @@ import { Header, page, s } from "@/components/ui";
 
 async function StatisticsContent() {
   await connection();
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
   const { unit, timeZone } = await getUserPrefs(userId);
   const today = todayIn(timeZone);
 

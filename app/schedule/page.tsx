@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { requireUserId } from "@/lib/auth";
+import { requireIdleUserId } from "@/lib/active-workout";
 import { WEEK_ORDER } from "@/lib/time";
 import { str } from "@/lib/strings";
 import { ScheduleView } from "./schedule-view";
@@ -10,7 +10,7 @@ import { Header, page as pageStyle, s, todayWidget, card } from "@/components/ui
 
 async function ScheduleContent() {
   await connection();
-  const userId = await requireUserId();
+  const userId = await requireIdleUserId();
 
   const [workoutsResult, plansResult] = await Promise.all([
     sql`

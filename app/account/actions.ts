@@ -4,7 +4,9 @@
 import { revalidatePath } from "next/cache";
 import { sql, isUniqueViolation } from "@/lib/db";
 import { requireUserId, destroyOtherSessions } from "@/lib/auth";
+import { workoutLockError } from "@/lib/active-workout";
 import { hashPassword, validateNewPassword, verifyPassword } from "@/lib/password";
+import { RATE_LIMITS, rateLimit, retryMessage } from "@/lib/rate-limit";
 import {
   EMAIL_PATTERN,
   LIMITS,
@@ -23,8 +25,15 @@ function revalidateAll() {
   revalidatePath("/", "layout");
 }
 
-export async function setUnitSystem(unit: WeightUnit): Promise<Result> {
+/** Signed in and not locked into an active workout; otherwise an error to show. */
+async function idleUser(): Promise<{ userId: string; error: string | null }> {
   const userId = await requireUserId();
+  return { userId, error: await workoutLockError(userId) };
+}
+
+export async function setUnitSystem(unit: WeightUnit): Promise<Result> {
+  const { userId, error } = await idleUser();
+  if (error) return { success: false, error };
   const next = normalizeUnit(unit);
   await sql`
     UPDATE user_profiles
@@ -40,8 +49,11 @@ export async function updateAccountDetails(formData: {
   age: number;
   email: string;
   username: string;
+  /** Required when the email address changes. */
+  currentPassword?: string;
 }): Promise<Result> {
-  const userId = await requireUserId();
+  const { userId, error: locked } = await idleUser();
+  if (locked) return { success: false, error: locked };
   const name = cleanText(formData?.name, LIMITS.name);
   const username = normalizeUsername(formData?.username);
   const email = normalizeEmail(formData?.email);
@@ -52,6 +64,21 @@ export async function updateAccountDetails(formData: {
   if (!EMAIL_PATTERN.test(email)) return { success: false, error: str.auth.emailInvalid };
   if (age === null) return { success: false, error: str.auth.ageInvalid };
 
+  // Changing the sign-in email needs the current password, so a briefly
+  // unattended phone can't be used to take the account over.
+  const current = await sql`
+    SELECT lower(trim(email)) AS email, password_hash FROM user_profiles WHERE user_id = ${userId} LIMIT 1
+  `;
+  if (current[0] && current[0].email !== email) {
+    if (!formData?.currentPassword?.trim()) {
+      return { success: false, error: str.account.emailNeedsPassword };
+    }
+    const limited = await rateLimit(RATE_LIMITS.passwordUser, userId);
+    if (!limited.ok) return { success: false, error: retryMessage(limited.retryAfterSeconds) };
+    const ok = await verifyPassword(formData.currentPassword, (current[0].password_hash as string | null) ?? null);
+    if (!ok) return { success: false, error: str.auth.passwordMismatch };
+  }
+
   try {
     const [usernameTaken, emailTaken] = await Promise.all([
       sql`
@@ -60,8 +87,9 @@ export async function updateAccountDetails(formData: {
         LIMIT 1
       `,
       sql`
-        SELECT 1 FROM user_profiles
-        WHERE lower(trim(email)) = ${email} AND user_id <> ${userId}
+        SELECT 1 FROM user_profiles WHERE lower(trim(email)) = ${email} AND user_id <> ${userId}
+        UNION ALL
+        SELECT 1 FROM users WHERE lower(trim(email)) = ${email} AND id <> ${userId}
         LIMIT 1
       `,
     ]);
@@ -96,7 +124,8 @@ export async function changePassword(input: {
   currentPassword: string;
   newPassword: string;
 }): Promise<Result> {
-  const userId = await requireUserId();
+  const { userId, error: locked } = await idleUser();
+  if (locked) return { success: false, error: locked };
 
   if (!input?.currentPassword?.trim()) {
     return { success: false, error: str.account.enterCurrentPassword };
@@ -104,10 +133,13 @@ export async function changePassword(input: {
   const invalid = validateNewPassword(input?.newPassword ?? "");
   if (invalid) return { success: false, error: invalid };
 
+  const limited = await rateLimit(RATE_LIMITS.passwordUser, userId);
+  if (!limited.ok) return { success: false, error: retryMessage(limited.retryAfterSeconds) };
+
   const rows = await sql`
     SELECT password_hash FROM user_profiles WHERE user_id = ${userId} LIMIT 1
   `;
-  const { ok } = await verifyPassword(input.currentPassword, rows[0]?.password_hash ?? null);
+  const ok = await verifyPassword(input.currentPassword, (rows[0]?.password_hash as string | null) ?? null);
   if (!ok) return { success: false, error: str.auth.passwordMismatch };
 
   const hashed = await hashPassword(input.newPassword);
@@ -125,7 +157,8 @@ export async function setNotification(
   key: "notify_workout_reminders" | "notify_rest_day_alerts",
   enabled: boolean
 ): Promise<Result> {
-  const userId = await requireUserId();
+  const { userId, error: locked } = await idleUser();
+  if (locked) return { success: false, error: locked };
   const next = Boolean(enabled);
 
   if (key === "notify_workout_reminders") {
@@ -149,12 +182,14 @@ export async function setNotification(
 }
 
 export async function resetWorkoutHistory(): Promise<Result> {
-  const userId = await requireUserId();
+  const { userId, error: locked } = await idleUser();
+  if (locked) return { success: false, error: locked };
 
   await sql.transaction([
     sql`DELETE FROM completed_sessions WHERE user_id = ${userId}`,
-    // Deleting sessions cascades to their logged sets.
-    sql`DELETE FROM workout_sessions WHERE user_id = ${userId}`,
+    // Finished sessions only (cascades to their sets). An open session is never
+    // touched here; it can only be finished or discarded from the workout screen.
+    sql`DELETE FROM workout_sessions WHERE user_id = ${userId} AND completed_at IS NOT NULL`,
     // Pre-migration logs that never got a session.
     sql`
       DELETE FROM workout_logs

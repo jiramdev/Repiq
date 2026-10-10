@@ -1,7 +1,7 @@
 // app/auth/auth-form.tsx
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   Action,
   input,
@@ -17,6 +17,7 @@ import {
 import { str } from "@/lib/strings";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-rules";
 import { loginUser, registerAndOnboard, checkUsernameAvailable } from "./actions";
+import { clearPageCaches } from "@/components/pwa";
 
 function browserTimeZone(): string | undefined {
   try {
@@ -42,6 +43,11 @@ export function AuthForm() {
     notify_workout_reminders: false,
     notify_rest_day_alerts: false,
   });
+
+  // Whoever signs in next must never see the previous user's cached pages.
+  useEffect(() => {
+    void clearPageCaches();
+  }, []);
 
   const goHome = () => {
     // Full navigation so the service worker and server components start fresh

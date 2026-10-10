@@ -39,3 +39,27 @@ export async function ensurePushSubscription(): Promise<boolean> {
     return false;
   }
 }
+
+/** This device's push endpoint, if it has one. */
+export async function currentPushEndpoint(): Promise<string | null> {
+  try {
+    if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return null;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager?.getSubscription();
+    return sub?.endpoint ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stop this device receiving pushes (used on sign-out). */
+export async function unsubscribePush(): Promise<void> {
+  try {
+    if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager?.getSubscription();
+    await sub?.unsubscribe();
+  } catch {
+    // best effort
+  }
+}
