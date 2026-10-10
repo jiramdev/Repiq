@@ -10,6 +10,7 @@ import { Client, Receiver } from "@upstash/qstash";
 import { randomUUID } from "crypto";
 import { sql } from "@/lib/db";
 import { isPushConfigured } from "@/lib/push";
+import { UUID_PATTERN } from "@/lib/validation";
 
 let client: Client | null = null;
 
@@ -32,6 +33,8 @@ export function getReceiver(): Receiver | null {
   return new Receiver({ currentSigningKey: current, nextSigningKey: next });
 }
 
+export const DELIVER_PATH = "/api/push/deliver";
+
 /** Public base URL QStash should call back. */
 export function appBaseUrl(requestUrl: string): string {
   const configuredUrl = process.env.APP_URL?.replace(/\/+$/, "");
@@ -44,6 +47,7 @@ export function appBaseUrl(requestUrl: string): string {
 
 /** Cancel a user's pending timers (all, or one). Best effort at QStash too. */
 export async function cancelRestTimers(userId: string, timerId?: string): Promise<number> {
+  if (timerId !== undefined && !UUID_PATTERN.test(timerId)) return 0;
   const rows = timerId
     ? await sql`
         UPDATE rest_timers SET cancelled_at = now()
@@ -87,7 +91,7 @@ export async function scheduleRestTimer(params: {
 
   try {
     const res = await qstash().publishJSON({
-      url: `${baseUrl}/api/push/deliver`,
+      url: `${baseUrl}${DELIVER_PATH}`,
       body: { timerId: id },
       delay: seconds,
       retries: 2,
@@ -106,7 +110,7 @@ export async function scheduleRestTimer(params: {
 export async function claimRestTimer(
   timerId: string
 ): Promise<{ userId: string; workoutId: number | null } | null> {
-  if (!/^[0-9a-f-]{36}$/i.test(timerId)) return null;
+  if (!UUID_PATTERN.test(timerId)) return null;
   const rows = await sql`
     UPDATE rest_timers SET sent_at = now()
     WHERE id = ${timerId}::uuid AND cancelled_at IS NULL AND sent_at IS NULL
@@ -116,4 +120,10 @@ export async function claimRestTimer(
   return row
     ? { userId: String(row.user_id), workoutId: row.workout_id == null ? null : Number(row.workout_id) }
     : null;
+}
+
+/** Give a claimed timer back (the push failed), so QStash's retry can send it. */
+export async function releaseRestTimer(timerId: string): Promise<void> {
+  if (!UUID_PATTERN.test(timerId)) return;
+  await sql`UPDATE rest_timers SET sent_at = NULL WHERE id = ${timerId}::uuid AND cancelled_at IS NULL`;
 }

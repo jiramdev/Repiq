@@ -35,15 +35,22 @@ export interface PushPayload {
   timerId?: string;
 }
 
+export interface PushResult {
+  sent: number;
+  /** Deliveries that failed for a reason worth retrying (not a gone subscription). */
+  failed: number;
+}
+
 /** Send to every device of a user; prunes subscriptions the push service has dropped. */
-export async function sendPushToUser(userId: string, payload: PushPayload): Promise<number> {
-  if (!ensureConfigured()) return 0;
+export async function sendPushToUser(userId: string, payload: PushPayload): Promise<PushResult> {
+  if (!ensureConfigured()) return { sent: 0, failed: 0 };
 
   const subscriptions = await sql`
     SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}
   `;
 
   let sent = 0;
+  let failed = 0;
   await Promise.all(
     subscriptions.map(async (sub) => {
       try {
@@ -58,10 +65,11 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
         if (status === 404 || status === 410) {
           await sql`DELETE FROM push_subscriptions WHERE endpoint = ${sub.endpoint}`;
         } else {
+          failed++;
           console.error("Push send error:", status ?? err);
         }
       }
     })
   );
-  return sent;
+  return { sent, failed };
 }

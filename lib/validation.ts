@@ -21,6 +21,16 @@ export function cleanText(value: unknown, maxLength: number): string | null {
   return trimmed;
 }
 
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Largest value of a Postgres `integer` (serial ids). */
+export const MAX_INT4 = 2_147_483_647;
+
+/** A positive database id, or null (rejects strings, floats and out-of-range values). */
+export function toId(value: unknown): number | null {
+  return toIntInRange(value, 1, MAX_INT4);
+}
+
 export const USERNAME_PATTERN = /^[a-z0-9_.]{3,30}$/;
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
