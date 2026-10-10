@@ -1,5 +1,6 @@
 // app/page.tsx
 import { Suspense } from "react";
+import { MainPage } from "@/components/main-page";
 import { LoadingScreen } from "@/components/loading-screen";
 import Link from "next/link";
 import { connection } from "next/server";
@@ -9,7 +10,7 @@ import { getUserProfile } from "@/lib/user";
 import { todayIn, resolveTimeZone } from "@/lib/time";
 import { convertWeight } from "@/lib/units";
 import { str } from "@/lib/strings";
-import { Header, todayWidget, card, label, metric, bodyMuted, meta, s } from "@/components/ui";
+import { todayWidget, card, label, metric, bodyMuted, meta, s } from "@/components/ui";
 import { MorningWorkoutNotifier } from "./morning-notifier";
 import { StartWorkoutButton } from "./start-workout-button";
 
@@ -143,14 +144,11 @@ async function DashboardContent() {
 
 export default function DashboardPage() {
   return (
-    <div className="min-h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none pb-28">
-      <main className={`w-full ${s.stack} pt-2`}>
-        <Header title={str.dashboard.title} />
+    <MainPage title={str.dashboard.title}>
 
         <Suspense fallback={<LoadingScreen />}>
           <DashboardContent />
         </Suspense>
-      </main>
-    </div>
+    </MainPage>
   );
 }
