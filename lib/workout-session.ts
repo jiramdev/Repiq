@@ -19,8 +19,8 @@ export interface OpenSession {
  * lock on the user, so two tabs (or a double render) can't seed twice and a
  * user can never have two workouts running at once.
  *
- * - Unfinished sessions from earlier days with nothing logged are dropped
- *   (for any day of the schedule). Sessions with logged sets are never dropped.
+ * - Unfinished sessions from earlier days (or older than 12 hours) with
+ *   nothing logged are dropped (for any day of the schedule). Sessions with logged sets are never dropped.
  * - A new session is only created when the user has no other open session and
  *   the plan has at least one exercise. Returns null when nothing is open for
  *   this schedule day afterwards.
@@ -41,7 +41,8 @@ export async function startOrResumeSession(params: {
       DELETE FROM workout_sessions s
       WHERE s.user_id = ${userId}
         AND s.completed_at IS NULL
-        AND s.started_on < ${today}::date
+        -- Leftovers: from an earlier day, or older than the lock-in lasts (LOCK_MAX_AGE_MS).
+        AND (s.started_on < ${today}::date OR s.started_at < now() - interval '12 hours')
         AND NOT EXISTS (
           SELECT 1 FROM workout_logs l
           WHERE l.session_id = s.id
@@ -177,6 +178,34 @@ export async function getOpenSession(
     SELECT id, plan_name, plan_id, to_char(started_on, 'YYYY-MM-DD') AS started_on
     FROM workout_sessions
     WHERE id = ${sessionId} AND user_id = ${userId} AND completed_at IS NULL
+    LIMIT 1
+  `;
+  const row = rows[0];
+  return row
+    ? {
+        id: Number(row.id),
+        plan_name: String(row.plan_name),
+        plan_id: row.plan_id == null ? null : Number(row.plan_id),
+        started_on: String(row.started_on),
+      }
+    : null;
+}
+
+/**
+ * The open session of a schedule day, if any. Read only: rendering the
+ * workout screen never starts a workout (see startWorkout in
+ * app/workout/[id]/actions.ts). If it did, the refresh after Finish or
+ * Discard would seed a new session and lock the user right back in.
+ */
+export async function getOpenSessionForWorkout(
+  userId: string,
+  workoutId: number
+): Promise<{ id: number; plan_name: string; plan_id: number | null; started_on: string } | null> {
+  const rows = await sql`
+    SELECT id, plan_name, plan_id, to_char(started_on, 'YYYY-MM-DD') AS started_on
+    FROM workout_sessions
+    WHERE workout_id = ${workoutId} AND user_id = ${userId} AND completed_at IS NULL
+    ORDER BY started_at DESC, id DESC
     LIMIT 1
   `;
   const row = rows[0];

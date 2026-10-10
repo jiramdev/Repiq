@@ -6,6 +6,10 @@ import { sql } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { getUserPrefs } from "@/lib/user";
 import { todayIn } from "@/lib/time";
+import { str } from "@/lib/strings";
+import { getActiveWorkout } from "@/lib/active-workout";
+import { startOrResumeSession } from "@/lib/workout-session";
+import { finishOpenSession, discardOpenSession } from "@/lib/workout-finish";
 import { normalizeUnit } from "@/lib/units";
 import { LIMITS, toId, toIntInRange, toNumberInRange } from "@/lib/validation";
 
@@ -83,12 +87,57 @@ export async function updateLogSet(
   return rows.length > 0 ? { ok: true } : { ok: false, retry: false };
 }
 
-function revalidateWorkout(workoutId: number) {
+function revalidateWorkout() {
+  // Not the workout page itself: re-rendering it is pointless once the
+  // session is gone, and the client leaves with a full navigation anyway.
   revalidatePath("/", "page");
   revalidatePath("/statistics", "page");
   revalidatePath("/schedule", "page");
   revalidatePath("/account", "page");
-  revalidatePath(`/workout/${workoutId}`, "page");
+}
+
+export type StartResult =
+  | { ok: true; workoutId: number }
+  | { ok: false; error: string; planId?: number };
+
+/**
+ * Start (or resume) the workout of a schedule day. The only place a session is
+ * created: an explicit tap on the dashboard, never a page render.
+ */
+export async function startWorkout(workoutId: number): Promise<StartResult> {
+  const userId = await requireUserId();
+  const id = toId(workoutId);
+  if (id === null) return { ok: false, error: str.common.genericError };
+
+  // Already in a workout: go there instead.
+  const active = await getActiveWorkout(userId);
+  if (active) return { ok: true, workoutId: active.workoutId };
+
+  const rows = await sql`
+    SELECT w.plan_id, p.title AS plan_title,
+           (SELECT count(*)::int FROM plan_exercises pe WHERE pe.plan_id = p.id) AS exercise_count
+    FROM workouts w
+    LEFT JOIN plans p ON p.id = w.plan_id AND p.user_id = w.user_id
+    WHERE w.id = ${id} AND w.user_id = ${userId}
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row || !row.plan_id || !row.plan_title) return { ok: false, error: str.common.genericError };
+  const planId = Number(row.plan_id);
+  if (Number(row.exercise_count) === 0) return { ok: false, error: str.workout.empty, planId };
+
+  const { unit, timeZone } = await getUserPrefs(userId);
+  const session = await startOrResumeSession({
+    userId,
+    workoutId: id,
+    planId,
+    planTitle: String(row.plan_title),
+    today: todayIn(timeZone).date,
+    unit,
+  });
+  // Null: another (old, unlocked) workout is still open. The dashboard shows it.
+  if (!session) return { ok: false, error: str.workout.otherOpen };
+  return { ok: true, workoutId: id };
 }
 
 /** Finish the open session. Safe to call twice: the second call does nothing. */
@@ -96,41 +145,20 @@ export async function completeWorkout(workoutId: number): Promise<{ ok: boolean 
   const userId = await requireUserId();
   const id = toId(workoutId);
   if (id === null) return { ok: false };
-
-  const { timeZone } = await getUserPrefs(userId);
-  const today = todayIn(timeZone).date;
-
-  await sql`
-    WITH done AS (
-      UPDATE workout_sessions
-      SET completed_at = now(), completed_on = ${today}::date
-      WHERE workout_id = ${id} AND user_id = ${userId} AND completed_at IS NULL
-      RETURNING id, user_id, workout_id, plan_name, completed_on
-    )
-    INSERT INTO completed_sessions (user_id, workout_id, plan_name, completed_date, session_id)
-    SELECT user_id, workout_id, plan_name, completed_on, id FROM done
-    ON CONFLICT (session_id) DO NOTHING
-  `;
-
-  revalidateWorkout(id);
+  await finishOpenSession(userId, id);
+  revalidateWorkout();
   return { ok: true };
 }
 
 /**
  * Throw away the open session and every set logged in it. Only ever called by
- * an explicit (two-step) Discard on the workout screen.
+ * an explicit, confirmed Discard on the workout screen.
  */
 export async function discardWorkout(workoutId: number): Promise<{ ok: boolean }> {
   const userId = await requireUserId();
   const id = toId(workoutId);
   if (id === null) return { ok: false };
-
-  // Sets go with the session (ON DELETE CASCADE).
-  await sql`
-    DELETE FROM workout_sessions
-    WHERE workout_id = ${id} AND user_id = ${userId} AND completed_at IS NULL
-  `;
-
-  revalidateWorkout(id);
+  await discardOpenSession(userId, id);
+  revalidateWorkout();
   return { ok: true };
 }

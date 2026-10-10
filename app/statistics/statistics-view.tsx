@@ -2,8 +2,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { MainPage } from "@/components/main-page";
 import {
-  Header,
   Section,
   card,
   label,
@@ -89,9 +89,7 @@ export function StatisticsView({
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#baa3d0] text-white pb-32 pt-4 px-4 select-none">
-      <main className="max-w-sm mx-auto space-y-3.5">
-        <Header title={str.statistics.title} />
+    <MainPage title={str.statistics.title}>
 
         <div className="grid grid-cols-2 gap-3.5">
           <div className={`${card} text-center flex flex-col justify-between items-center aspect-square`}>
@@ -180,7 +178,6 @@ export function StatisticsView({
             </div>
           </div>
         </Section>
-      </main>
-    </div>
+    </MainPage>
   );
 }

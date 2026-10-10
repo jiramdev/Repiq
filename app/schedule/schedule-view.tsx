@@ -2,10 +2,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { MainPage } from "@/components/main-page";
 import Link from "next/link";
 import { assignPlanToWorkout, createPlan } from "./actions";
 import {
-  Header,
   Section,
   Action,
   input,
@@ -59,9 +59,7 @@ export function ScheduleView({
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#baa3d0] text-white pb-28 pt-4 px-4 select-none">
-      <main className="max-w-sm mx-auto space-y-3.5">
-        <Header title={str.schedule.title} />
+    <MainPage title={str.schedule.title}>
 
         <Section label={str.schedule.week} meta={str.schedule.weekMeta}>
           <div className="space-y-2 pt-1">
@@ -155,7 +153,6 @@ export function ScheduleView({
             )}
           </div>
         </Section>
-      </main>
-    </div>
+    </MainPage>
   );
 }

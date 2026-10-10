@@ -167,11 +167,29 @@ export function useSetSaver(sessionId: number) {
     [flush, persist]
   );
 
-  /** Send everything now. Resolves true when nothing is left unsaved. */
-  const flushNow = useCallback(async (): Promise<boolean> => {
-    await flush();
-    return Object.keys(pending.current).length === 0 && Object.keys(sending.current).length === 0;
-  }, [flush]);
+  const unsavedCount = useCallback(
+    () => new Set([...Object.keys(pending.current), ...Object.keys(sending.current)]).size,
+    []
+  );
+
+  /**
+   * Send everything now. Resolves true when nothing is left unsaved. Never
+   * waits longer than `timeoutMs`: a hanging request must not block Finish.
+   */
+  const flushNow = useCallback(
+    async (timeoutMs = 8000): Promise<boolean> => {
+      let timer: number | undefined;
+      await Promise.race([
+        flush().catch(() => {}),
+        new Promise<void>((resolve) => {
+          timer = window.setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+      window.clearTimeout(timer);
+      return unsavedCount() === 0;
+    },
+    [flush, unsavedCount]
+  );
 
   const forget = useCallback(() => {
     window.clearTimeout(debounce.current);
@@ -204,5 +222,5 @@ export function useSetSaver(sessionId: number) {
     };
   }, [flush]);
 
-  return { status, queue, flushNow, forget, restore, retryNow: flush };
+  return { status, queue, flushNow, unsavedCount, forget, restore, retryNow: flush };
 }

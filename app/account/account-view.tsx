@@ -2,8 +2,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { MainPage } from "@/components/main-page";
 import {
-  Header,
   Section,
   Action,
   card,
@@ -16,7 +16,6 @@ import {
   segment,
   toggleBadge,
   error as errorText,
-  s,
 } from "@/components/ui";
 import { str } from "@/lib/strings";
 import type { UserProfile } from "@/lib/user";
@@ -194,10 +193,8 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
   const rowClass = `${row} px-5 py-1.5 flex items-center justify-between gap-3`;
 
   return (
-    <div className="min-h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none pb-28">
-      {leaving && <LoadingScreen />}
-      <main className={`max-w-sm mx-auto w-full ${s.stack}`}>
-        <Header title={str.account.title} />
+    <MainPage title={str.account.title}>
+        {leaving && <LoadingScreen />}
 
         <section className={card}>
           <p className={label}>{str.account.profile}</p>
@@ -485,7 +482,6 @@ export function AccountView({ profile, stats }: { profile: UserProfile; stats: A
             {dangerError && <p className={`${errorText} px-1`} role="alert">{dangerError}</p>}
           </div>
         </Section>
-      </main>
-    </div>
+    </MainPage>
   );
 }
