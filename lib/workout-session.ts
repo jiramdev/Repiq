@@ -71,7 +71,9 @@ export async function startOrResumeSession(params: {
         s.id,
         pe.name,
         gs.n,
-        CASE WHEN pe.exercise_type = 'static' THEN NULL ELSE pe.reps END,
+        -- Never NULL: older databases (production) have workout_logs.target_reps
+        -- NOT NULL. Static holds don't use it (getSessionLogs reads it as null).
+        COALESCE(pe.reps, CASE WHEN pe.exercise_type = 'static' THEN 1 ELSE 10 END),
         COALESCE(pe.rest_seconds, 90),
         (dense_rank() OVER (ORDER BY COALESCE(pe.position, 2147483647), pe.id))::int - 1,
         ${unit},
@@ -155,7 +157,8 @@ export async function getSessionLogs(params: {
     exercise_name: String(l.exercise_name),
     order_index: Number(l.order_index),
     set_number: Number(l.set_number),
-    target_reps: l.target_reps == null ? null : Number(l.target_reps),
+    target_reps:
+      l.target_reps == null || l.exercise_type === "static" ? null : Number(l.target_reps),
     rest_seconds: Number(l.rest_seconds),
     actual_weight: convertWeight(l.actual_weight, l.weight_unit, unit),
     actual_reps: l.actual_reps == null ? null : Number(l.actual_reps),

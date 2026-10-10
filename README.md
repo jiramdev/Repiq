@@ -65,6 +65,7 @@ SQL editor or with `psql "$DATABASE_URL" -f db/migrations/0001_auth_sessions.sql
 | `0007_rate_limits.sql` | `rate_limits` table, expired-session cleanup, open-session index |
 | `0008_profile_body_weight.sql` | `user_profiles.body_weight` / `body_weight_unit`, backfilled from the weight log |
 | `0009_exercise_types.sql` | exercise types (`weighted`/`bodyweight`/`static`), hold-time columns, `plan_exercises.position`. Existing rows become `weighted`; shared library exercises get a type from their name. **Run before deploying.** |
+| `0010_workout_logs_nullable.sql` | aligns `workout_logs` on databases older than the baseline: `target_reps`/`actual_*` nullable, no `0 kg × 10` defaults on new sets; clears those defaults from unfinished sets in open sessions only. Safe any time, before or after deploying. |
 
 Every migration is idempotent. Where existing data could block a constraint, the
 migration skips it and prints a `NOTICE` with a query to find the offending rows.
