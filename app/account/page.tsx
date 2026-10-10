@@ -1,33 +1,23 @@
 // app/account/page.tsx
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { getActiveUserId } from "@/lib/auth";
-import { AccountView, UserProfileData } from "./account-view";
+import { requireUserId } from "@/lib/auth";
+import { getUserProfile } from "@/lib/user";
+import { convertWeight } from "@/lib/units";
+import { str } from "@/lib/strings";
+import { AccountView } from "./account-view";
 import { Header, s, card } from "@/components/ui";
 
 async function AccountContent() {
   await connection();
-  const userId = await getActiveUserId();
+  const userId = await requireUserId();
 
-  const [profileResult, workoutsCount, plansCount, weightResult] = await Promise.all([
-    sql`
-      SELECT name, username, email, age, password_hash, unit_system,
-             notify_workout_reminders, notify_rest_day_alerts
-      FROM user_profiles
-      WHERE user_id = ${userId}
-      LIMIT 1
-    `,
-    sql`
-      SELECT COUNT(*)::int AS count
-      FROM completed_sessions
-      WHERE user_id = ${userId}
-    `,
-    sql`
-      SELECT COUNT(*)::int AS count
-      FROM plans
-      WHERE user_id = ${userId}
-    `,
+  const [profile, workoutsCount, plansCount, weightResult] = await Promise.all([
+    getUserProfile(userId),
+    sql`SELECT COUNT(*)::int AS count FROM completed_sessions WHERE user_id = ${userId}`,
+    sql`SELECT COUNT(*)::int AS count FROM plans WHERE user_id = ${userId}`,
     sql`
       SELECT value::float AS value, unit
       FROM metrics
@@ -37,42 +27,32 @@ async function AccountContent() {
     `,
   ]);
 
-  const defaultProfile: UserProfileData = {
-    name: "Marijn",
-    username: "marijn",
-    email: "marijn@repiq.app",
-    age: 24,
-    password_hash: "••••••••••••",
-    unit_system: "kg",
-    notify_workout_reminders: true,
-    notify_rest_day_alerts: false,
-  };
+  // No profile row means a broken account; don't invent one.
+  if (!profile) redirect("/auth");
 
-  const profile: UserProfileData = (profileResult[0] as UserProfileData) || defaultProfile;
+  const latestWeight = weightResult[0]
+    ? convertWeight(Number(weightResult[0].value), weightResult[0].unit, profile.unit_system)
+    : null;
 
-  let latestWeight: number | null =
-    weightResult[0]?.value != null ? Number(weightResult[0].value) : null;
-
-  if (latestWeight != null && profile.unit_system === "lbs") {
-    latestWeight = Math.round(latestWeight * 2.20462 * 10) / 10;
-  }
-
-  const stats = {
-    totalWorkouts: workoutsCount[0]?.count ?? 0,
-    totalPlans: plansCount[0]?.count ?? 0,
-    latestWeight,
-  };
-
-  return <AccountView profile={profile} stats={stats} />;
+  return (
+    <AccountView
+      profile={profile}
+      stats={{
+        totalWorkouts: workoutsCount[0]?.count ?? 0,
+        totalPlans: plansCount[0]?.count ?? 0,
+        latestWeight,
+      }}
+    />
+  );
 }
 
 export default function AccountPage() {
   return (
     <Suspense
       fallback={
-        <div className="h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none overflow-hidden pb-24">
+        <div className="min-h-[100dvh] max-w-sm mx-auto p-4 flex flex-col justify-start select-none overflow-hidden pb-24">
           <main className={`w-full ${s.stack} pt-2 animate-pulse`}>
-            <Header title="Account" />
+            <Header title={str.account.title} />
             <div className={`${card} opacity-60 h-28`} />
             <div className={`${card} opacity-60 h-44`} />
             <div className={`${card} opacity-60 h-32`} />

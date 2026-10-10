@@ -2,33 +2,23 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
-import { getActiveUserId } from "@/lib/auth";
+import { requireUserId } from "@/lib/auth";
+import { WEEK_ORDER } from "@/lib/time";
+import { str } from "@/lib/strings";
 import { ScheduleView } from "./schedule-view";
 import { Header, page as pageStyle, s, todayWidget, card } from "@/components/ui";
 
-interface WorkoutRow {
-  id: number;
-  name: string;
-  day_label: string;
-}
-
-interface PlanRow {
-  id: number;
-  title: string;
-  exercise_count: number;
-}
-
-const DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-
 async function ScheduleContent() {
   await connection();
-  const userId = await getActiveUserId();
+  const userId = await requireUserId();
 
   const [workoutsResult, plansResult] = await Promise.all([
     sql`
-      SELECT id, name, day_label
-      FROM workouts
-      WHERE user_id = ${userId}
+      SELECT DISTINCT ON (w.day_label) w.id, w.day_label, w.plan_id, p.title AS plan_title
+      FROM workouts w
+      LEFT JOIN plans p ON p.id = w.plan_id AND p.user_id = w.user_id
+      WHERE w.user_id = ${userId}
+      ORDER BY w.day_label, w.id
     `,
     sql`
       SELECT id, title, exercise_count
@@ -38,21 +28,24 @@ async function ScheduleContent() {
     `,
   ]);
 
-  const existingWorkouts = workoutsResult as WorkoutRow[];
-  const plans = plansResult as PlanRow[];
-
-  // Ensure all 7 days of the week exist in memory
-  const workoutMap = new Map(existingWorkouts.map((w) => [w.day_label, w]));
-  const fullSchedule = DAY_ORDER.map((day) => {
-    const found = workoutMap.get(day);
+  const byDay = new Map(workoutsResult.map((w) => [String(w.day_label), w]));
+  const schedule = WEEK_ORDER.map((day) => {
+    const w = byDay.get(day);
+    const planId = w?.plan_id != null && w?.plan_title != null ? Number(w.plan_id) : null;
     return {
-      id: found?.id ?? null,
-      name: found?.name ?? "Rest",
       day_label: day,
+      plan_id: planId,
+      plan_title: planId != null ? String(w!.plan_title) : null,
     };
   });
 
-  return <ScheduleView scheduleList={fullSchedule} planList={plans} />;
+  const plans = plansResult.map((p) => ({
+    id: Number(p.id),
+    title: String(p.title),
+    exercise_count: Number(p.exercise_count) || 0,
+  }));
+
+  return <ScheduleView scheduleList={schedule} planList={plans} />;
 }
 
 export default function SchedulePage() {
@@ -61,7 +54,7 @@ export default function SchedulePage() {
       fallback={
         <div className={pageStyle()}>
           <main className={`max-w-sm mx-auto ${s.stack} animate-pulse`}>
-            <Header title="Schedule" />
+            <Header title={str.schedule.title} />
             <div className={`${todayWidget} opacity-60 h-44`} />
             <div className={`${card} opacity-60 h-36`} />
           </main>

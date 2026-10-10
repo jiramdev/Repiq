@@ -1,40 +1,81 @@
 // lib/auth.ts
-import { cookies } from "next/headers";
+import { cache } from "react";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { sql } from "@/lib/db";
+import {
+  SESSION_COOKIE,
+  LEGACY_SESSION_COOKIE,
+  SESSION_TTL_SECONDS,
+  generateSessionToken,
+  hashSessionToken,
+  looksLikeSessionToken,
+} from "@/lib/session-token";
 
-const SESSION_COOKIE = "repiq_session_user_id";
-
-export async function getActiveUserId(): Promise<string> {
+/**
+ * Returns the signed-in user's id, or null. There is deliberately no fallback
+ * user: no valid session means not signed in.
+ */
+export const getSessionUserId = cache(async (): Promise<string | null> => {
   const cookieStore = await cookies();
-  const rawId = cookieStore.get(SESSION_COOKIE)?.value?.trim();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!looksLikeSessionToken(token)) return null;
 
-  if (rawId) {
-    return rawId;
-  }
-
-  // Fallback to default user if no cookie exists
-  const defaultUser = await sql`
-    SELECT id FROM users ORDER BY created_at ASC NULLS LAST LIMIT 1
+  const rows = await sql`
+    SELECT user_id
+    FROM sessions
+    WHERE token_hash = ${hashSessionToken(token)}
+      AND expires_at > now()
+    LIMIT 1
   `;
-  if (defaultUser.length > 0) {
-    return String(defaultUser[0].id);
-  }
+  return rows.length > 0 ? String(rows[0].user_id) : null;
+});
 
-  return "user_demo_1";
+/** For pages and server actions: the user id, or a redirect to /auth. */
+export async function requireUserId(): Promise<string> {
+  const userId = await getSessionUserId();
+  if (!userId) redirect("/auth");
+  return userId;
 }
 
-export async function setSessionUser(userId: string) {
+export async function createSession(userId: string): Promise<void> {
+  const token = generateSessionToken();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
+  const userAgent = (await headers()).get("user-agent")?.slice(0, 255) ?? null;
+
+  await sql`
+    INSERT INTO sessions (user_id, token_hash, expires_at, user_agent)
+    VALUES (${userId}, ${hashSessionToken(token)}, ${expiresAt.toISOString()}, ${userAgent})
+  `;
+
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, String(userId), {
+  cookieStore.delete(LEGACY_SESSION_COOKIE);
+  cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
+    maxAge: SESSION_TTL_SECONDS,
   });
 }
 
-export async function clearSessionUser() {
+export async function destroySession(): Promise<void> {
   const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (looksLikeSessionToken(token)) {
+    await sql`DELETE FROM sessions WHERE token_hash = ${hashSessionToken(token)}`;
+  }
   cookieStore.delete(SESSION_COOKIE);
+  cookieStore.delete(LEGACY_SESSION_COOKIE);
+}
+
+/** Sign out every other device, e.g. after a password change. */
+export async function destroyOtherSessions(userId: string): Promise<void> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  const keep = looksLikeSessionToken(token) ? hashSessionToken(token) : "";
+  await sql`
+    DELETE FROM sessions
+    WHERE user_id = ${userId} AND token_hash <> ${keep}
+  `;
 }
