@@ -28,6 +28,11 @@ export async function handleWorkoutEscape(
   const { id } = await params;
   const workoutId = toId(/^\d+$/.test(id) ? Number(id) : NaN);
   if (workoutId === null) return NextResponse.json({ ok: false }, { status: 400, headers: noStore });
-  await run(userId, workoutId);
+  try {
+    await run(userId, workoutId);
+  } catch (err) {
+    console.error("workout escape route failed:", err);
+    return NextResponse.json({ ok: false, error: "server" }, { status: 500, headers: noStore });
+  }
   return NextResponse.json({ ok: true }, { headers: noStore });
 }

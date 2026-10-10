@@ -34,6 +34,7 @@ import { useWakeLock } from "@/lib/client/use-wake-lock";
 import { ensurePushSubscription } from "@/lib/client/push";
 import { setActiveWorkoutMarker } from "@/lib/client/active-workout-marker";
 import { LoadingScreen } from "@/components/loading-screen";
+import { classifyActionError, handleActionError, recoverFromStaleApp } from "@/lib/client/action-errors";
 import type { WorkoutDetail, WorkoutLog } from "./types";
 import { completeWorkout, discardWorkout } from "./actions";
 
@@ -283,15 +284,18 @@ export function WorkoutView({
   // blip, a deploy that changed the action ids, a server error), fall back to
   // the plain POST route. Then leave with a full page load, so no router
   // cache, refresh or stale client state can bring the workout back.
-  const runLeave = async (kind: "finish" | "discard"): Promise<boolean> => {
+  const runLeave = async (kind: "finish" | "discard"): Promise<string | null> => {
+    let failure: unknown = null;
     try {
       const res = await withTimeout(
         kind === "finish" ? completeWorkout(workout.id) : discardWorkout(workout.id),
         10_000
       );
-      if (res?.ok) return true;
-    } catch {
-      // fall through to the route
+      if (res?.ok) return null;
+    } catch (err) {
+      failure = err;
+      // A deploy replaced this app: reload instead of trying the route.
+      if (classifyActionError(err) === "stale" && recoverFromStaleApp()) return str.errors.reloading;
     }
     try {
       const res = await withTimeout(
@@ -302,9 +306,10 @@ export function WorkoutView({
         }),
         10_000
       );
-      return res.ok;
-    } catch {
-      return false;
+      if (res.ok) return null;
+      return res.status >= 500 ? str.errors.server : str.common.genericError;
+    } catch (err) {
+      return handleActionError(failure ?? err).message;
     }
   };
 
@@ -328,8 +333,9 @@ export function WorkoutView({
           return;
         }
       }
-      if (await runLeave("finish")) leave();
-      else setFinishError(str.workout.actionFailed);
+      const problem = await runLeave("finish");
+      if (problem === null) leave();
+      else setFinishError(problem);
     });
   };
 
@@ -337,8 +343,9 @@ export function WorkoutView({
     setConfirmDiscard(false);
     setFinishError(null);
     startTransition(async () => {
-      if (await runLeave("discard")) leave();
-      else setFinishError(str.workout.actionFailed);
+      const problem = await runLeave("discard");
+      if (problem === null) leave();
+      else setFinishError(problem);
     });
   };
 

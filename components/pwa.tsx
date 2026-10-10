@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { str } from "@/lib/strings";
+import { classifyActionError, recoverFromStaleApp } from "@/lib/client/action-errors";
 
 /**
  * Registers the service worker once for the whole app (root layout) and shows
@@ -52,6 +53,22 @@ export function PwaManager() {
     return () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
       if (interval) window.clearInterval(interval);
+    };
+  }, []);
+
+  // After a deploy, an old page can fail to load one of its code chunks (or
+  // call an action the server no longer knows). Recover by reloading fresh.
+  useEffect(() => {
+    const onFailure = (reason: unknown) => {
+      if (classifyActionError(reason) === "stale") recoverFromStaleApp();
+    };
+    const onError = (e: ErrorEvent) => onFailure(e.error ?? e.message);
+    const onRejection = (e: PromiseRejectionEvent) => onFailure(e.reason);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
     };
   }, []);
 
