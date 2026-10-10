@@ -2,6 +2,7 @@
 // An in-memory Postgres (PGlite) behind the same tagged-template API as the
 // Neon client, so server actions run their real SQL in tests.
 import { PGlite, type Transaction } from "@electric-sql/pglite";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -61,8 +62,13 @@ export function createSql(db: PGlite) {
   return sql;
 }
 
+/** An empty in-memory database with the extensions the migrations use. */
+export function newDb() {
+  return new PGlite({ extensions: { pgcrypto } });
+}
+
 export async function freshDb() {
-  const db = new PGlite();
+  const db = newDb();
   await applyMigrations(db);
   return db;
 }

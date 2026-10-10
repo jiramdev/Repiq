@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
+import { isBcryptHash, verifyPassword } from "@/lib/password";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyMigrations, migrationFiles, MIGRATIONS_DIR } from "./helpers/pg";
+import { applyMigrations, migrationFiles, MIGRATIONS_DIR, newDb } from "./helpers/pg";
 
 describe("migrations", () => {
   it("apply cleanly to an empty database and are idempotent", async () => {
-    const db = new PGlite();
+    const db = newDb();
     await applyMigrations(db);
     await applyMigrations(db); // second run must be a no-op
     const tables = await db.query<{ table_name: string }>(
@@ -18,7 +18,7 @@ describe("migrations", () => {
   });
 
   it("upgrade legacy data: plan links, sessions, duplicate sets, multi-session days", async () => {
-    const db = new PGlite();
+    const db = newDb();
     const [baseline, ...rest] = migrationFiles();
     await db.exec(readFileSync(join(MIGRATIONS_DIR, baseline), "utf8"));
 
@@ -66,5 +66,39 @@ describe("migrations", () => {
 
     const tz = await db.query<{ timezone: string }>(`SELECT timezone FROM user_profiles`);
     expect(tz.rows[0].timezone).toBe("Europe/Amsterdam");
+  });
+
+  it("0006 hashes leftover plain-text passwords so bcryptjs accepts them", async () => {
+    const db = newDb();
+    const files = migrationFiles();
+    const upTo = files.findIndex((f) => f.startsWith("0006"));
+    for (const file of files.slice(0, upTo)) await db.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
+
+    const existing = "$2b$12$o05e0c04WIt8//3vzrvcHuRhCqNyTqUrnUSF4YfXD2nyldwfWKoKG";
+    await db.exec(`
+      INSERT INTO user_profiles (user_id, username, password_hash) VALUES
+        ('plain', 'plain', 'hunter2-legacy'),
+        ('spaced', 'spaced', '  padded pass  '),
+        ('blank', 'blank', '   '),
+        ('none', 'none', NULL),
+        ('hashed', 'hashed', '${existing}');
+    `);
+
+    await applyMigrations(db, files.slice(upTo));
+    await applyMigrations(db, files.slice(upTo)); // idempotent
+
+    const rows = await db.query<{ user_id: string; password_hash: string | null }>(
+      `SELECT user_id, password_hash FROM user_profiles ORDER BY user_id`
+    );
+    const byId = Object.fromEntries(rows.rows.map((r) => [r.user_id, r.password_hash]));
+
+    expect(isBcryptHash(byId.plain)).toBe(true);
+    expect(await verifyPassword("hunter2-legacy", byId.plain)).toBe(true);
+    expect(await verifyPassword("wrong", byId.plain)).toBe(false);
+    // The app trims passwords, so the trimmed value is what was hashed.
+    expect(await verifyPassword("padded pass", byId.spaced)).toBe(true);
+    expect(byId.blank).toBeNull();
+    expect(byId.none).toBeNull();
+    expect(byId.hashed).toBe(existing); // already-hashed rows are untouched
   });
 });
