@@ -10,17 +10,18 @@ import { useParams, useRouter } from "next/navigation";
 import { Header, Action, card, hint, error as errorText, s } from "@/components/ui";
 import { str } from "@/lib/strings";
 import { setActiveWorkoutMarker } from "@/lib/client/active-workout-marker";
+import { handleActionError } from "@/lib/client/action-errors";
 
 export default function WorkoutError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const leave = async (kind: "finish" | "discard") => {
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       const res = await fetch(`/api/workout/${encodeURIComponent(id)}/${kind}`, {
         method: "POST",
@@ -32,10 +33,10 @@ export default function WorkoutError({ reset }: { error: Error & { digest?: stri
         window.location.replace("/");
         return;
       }
-    } catch {
-      // offline
+      setFailed(res.status >= 500 ? str.errors.server : str.common.genericError);
+    } catch (err) {
+      setFailed(handleActionError(err).message);
     }
-    setFailed(true);
     setBusy(false);
   };
 
@@ -47,7 +48,7 @@ export default function WorkoutError({ reset }: { error: Error & { digest?: stri
           <p className={hint}>{str.workout.leaveError}</p>
           {failed && (
             <p className={errorText} role="alert">
-              {str.workout.actionFailed}
+              {failed}
             </p>
           )}
           <div className="grid grid-cols-2 gap-2 pt-1">

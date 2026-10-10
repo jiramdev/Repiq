@@ -111,6 +111,12 @@ export const str = {
     removed: (name: string) => `Removed ${name}`,
     undo: "Undo",
   },
+  errors: {
+    server: "Something went wrong on our side. Please try again in a moment.",
+    staleApp: "Repiq was updated. Reload the app to continue.",
+    reloading: "Repiq was updated. Reloading…",
+    reload: "Reload",
+  },
   workout: {
     title: "Workout",
     set: "Set",

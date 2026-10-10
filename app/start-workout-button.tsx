@@ -3,11 +3,10 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { startWorkout } from "@/app/workout/[id]/actions";
 import { error as errorText } from "@/components/ui";
 import { LoadingScreen } from "@/components/loading-screen";
-import { str } from "@/lib/strings";
+import { handleActionError } from "@/lib/client/action-errors";
 
 /**
  * Starts today's workout. Starting is an explicit action: the workout page
@@ -43,9 +42,8 @@ export function StartWorkoutButton({
         }
         setError(res.error);
       } catch (err) {
-        // A new version was deployed since this page loaded.
-        if (unstable_isUnrecognizedActionError(err)) window.location.reload();
-        else setError(str.workout.actionFailed);
+        // Network, a stale app after a deploy (reloads by itself), or a server error.
+        setError(handleActionError(err).message);
       }
     });
   };

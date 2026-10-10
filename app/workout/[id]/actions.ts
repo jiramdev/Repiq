@@ -98,7 +98,8 @@ function revalidateWorkout() {
 
 export type StartResult =
   | { ok: true; workoutId: number }
-  | { ok: false; error: string; planId?: number };
+  /** kind "server": the database refused; the client says so instead of blaming the network. */
+  | { ok: false; error: string; planId?: number; kind?: "server" };
 
 /**
  * Start (or resume) the workout of a schedule day. The only place a session is
@@ -108,6 +109,16 @@ export async function startWorkout(workoutId: number): Promise<StartResult> {
   const userId = await requireUserId();
   const id = toId(workoutId);
   if (id === null) return { ok: false, error: str.common.genericError };
+  try {
+    return await startWorkoutFor(userId, id);
+  } catch (err) {
+    // Log the real cause for the server logs; tell the client it was us.
+    console.error("startWorkout failed:", err);
+    return { ok: false, error: str.errors.server, kind: "server" };
+  }
+}
+
+async function startWorkoutFor(userId: string, id: number): Promise<StartResult> {
 
   // Already in a workout: go there instead.
   const active = await getActiveWorkout(userId);
