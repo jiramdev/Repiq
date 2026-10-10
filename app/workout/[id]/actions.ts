@@ -12,13 +12,18 @@ import { LIMITS, toId, toIntInRange, toNumberInRange } from "@/lib/validation";
 export type LogPatch = {
   actual_weight?: number | null;
   actual_reps?: number | null;
+  /** Static holds, in seconds. */
+  duration_seconds?: number | null;
   completed?: boolean;
   /** Unit the weight was entered in. */
   unit?: string;
 };
 
 /**
- * Save one set. Only sets in the caller's own, unfinished sessions can change.
+ * Save one set. Only sets in the caller's own, unfinished sessions can change,
+ * and only with the fields of the set's type: a weight only for weighted sets,
+ * reps not for static holds, a duration only for static holds. Clearing a
+ * field (null) is always allowed.
  * `retry: false` tells the client the change can never succeed (invalid or not
  * theirs) so it should stop retrying.
  */
@@ -33,8 +38,9 @@ export async function updateLogSet(
 
   const hasWeight = "actual_weight" in patch;
   const hasReps = "actual_reps" in patch;
+  const hasDuration = "duration_seconds" in patch;
   const hasCompleted = "completed" in patch;
-  if (!hasWeight && !hasReps && !hasCompleted) return { ok: true };
+  if (!hasWeight && !hasReps && !hasDuration && !hasCompleted) return { ok: true };
 
   const weight =
     patch.actual_weight == null
@@ -47,6 +53,11 @@ export async function updateLogSet(
 
   if (hasWeight && patch.actual_weight != null && weight === null) return { ok: false, retry: false };
   if (hasReps && patch.actual_reps != null && reps === null) return { ok: false, retry: false };
+  const duration =
+    patch.duration_seconds == null
+      ? null
+      : toIntInRange(patch.duration_seconds, LIMITS.loggedSeconds.min, LIMITS.loggedSeconds.max);
+  if (hasDuration && patch.duration_seconds != null && duration === null) return { ok: false, retry: false };
   if (hasCompleted && typeof patch.completed !== "boolean") return { ok: false, retry: false };
 
   const unit = normalizeUnit(patch.unit);
@@ -56,12 +67,16 @@ export async function updateLogSet(
     SET actual_weight = CASE WHEN ${hasWeight}::boolean THEN ${weight}::numeric ELSE wl.actual_weight END,
         weight_unit   = CASE WHEN ${hasWeight}::boolean THEN ${unit} ELSE wl.weight_unit END,
         actual_reps   = CASE WHEN ${hasReps}::boolean THEN ${reps}::int ELSE wl.actual_reps END,
+        duration_seconds = CASE WHEN ${hasDuration}::boolean THEN ${duration}::int ELSE wl.duration_seconds END,
         completed     = CASE WHEN ${hasCompleted}::boolean THEN ${Boolean(patch.completed)}::boolean ELSE wl.completed END
     FROM workout_sessions s
     WHERE wl.id = ${id}
       AND s.id = wl.session_id
       AND s.user_id = ${userId}
       AND s.completed_at IS NULL
+      AND (${weight}::numeric IS NULL OR wl.exercise_type = 'weighted')
+      AND (${reps}::int IS NULL OR wl.exercise_type <> 'static')
+      AND (${duration}::int IS NULL OR wl.exercise_type = 'static')
     RETURNING wl.id
   `;
 

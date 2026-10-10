@@ -82,7 +82,7 @@ export async function assignPlanToWorkout(
         AND NOT EXISTS (
           SELECT 1 FROM workout_logs l
           WHERE l.session_id = s.id
-            AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL)
+            AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL OR l.duration_seconds IS NOT NULL)
         )
     `;
   } else {

@@ -49,9 +49,15 @@ export const LIMITS = {
   timerSeconds: { min: 5, max: 1800 },
   weight: { min: 0, max: 2000 },
   loggedReps: { min: 0, max: 1000 },
+  /** Target hold time of a static exercise in a plan. */
+  holdSeconds: { min: 1, max: 600 },
+  /** Logged hold time of a static set. */
+  loggedSeconds: { min: 0, max: 3600 },
   /** Body weight in kg; the lbs range is derived from it (see lib/units.ts). */
   bodyWeight: { min: 25, max: 400 },
   age: { min: 13, max: 120 },
+  /** Exercise rows in one plan. */
+  planExercises: 200,
   planTitle: 60,
   exerciseName: 80,
   name: 80,

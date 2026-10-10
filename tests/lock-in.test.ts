@@ -152,9 +152,10 @@ describe("guards while a workout is active", () => {
     expect(await scheduleActions.createPlan("New")).toEqual({ id: null, error: LOCKED });
     expect(await scheduleActions.assignPlanToWorkout("TUE", 10)).toEqual({ success: false, error: LOCKED });
     expect(await planActions.updatePlanTitle(10, "Renamed")).toEqual({ success: false, error: LOCKED });
-    expect(await planActions.addExerciseToPlan(10, "Squat", 3, 5, 120)).toEqual({ success: false, error: LOCKED });
-    expect(await planActions.updatePlanExercise(10, 100, "Bench", 3, 5, 120)).toEqual({ success: false, error: LOCKED });
+    expect(await planActions.addExerciseToPlan(10, { name: "Squat", type: "weighted", sets: 3, reps: 5, rest: 120 })).toEqual({ success: false, error: LOCKED });
+    expect(await planActions.updatePlanExercise(10, 100, { name: "Bench", type: "weighted", sets: 3, reps: 5, rest: 120 })).toEqual({ success: false, error: LOCKED });
     expect(await planActions.deleteExercise(10, 100)).toEqual({ success: false, error: LOCKED });
+    expect(await planActions.reorderPlanExercises(10, [100])).toEqual({ success: false, error: LOCKED });
     expect(await planActions.deletePlan(10)).toEqual({ success: false, error: LOCKED });
     expect(await accountActions.setUnitSystem("lbs")).toEqual({ success: false, error: LOCKED });
     expect(await accountActions.setNotification("notify_rest_day_alerts", true)).toEqual({ success: false, error: LOCKED });

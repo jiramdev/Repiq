@@ -1,6 +1,7 @@
 // lib/workout-session.ts
 import { sql } from "@/lib/db";
 import { convertWeight, type WeightUnit } from "@/lib/units";
+import { normalizeExerciseType } from "@/lib/exercise-types";
 import type { WorkoutLog } from "@/app/workout/[id]/types";
 
 /** Namespace for pg_advisory_xact_lock(namespace, hashtext(user_id)). */
@@ -44,7 +45,7 @@ export async function startOrResumeSession(params: {
         AND NOT EXISTS (
           SELECT 1 FROM workout_logs l
           WHERE l.session_id = s.id
-            AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL)
+            AND (COALESCE(l.completed, false) OR l.actual_weight IS NOT NULL OR l.actual_reps IS NOT NULL OR l.duration_seconds IS NOT NULL)
         )
     `,
     sql`
@@ -62,16 +63,19 @@ export async function startOrResumeSession(params: {
     `,
     sql`
       INSERT INTO workout_logs
-        (workout_id, session_id, exercise_name, set_number, target_reps, rest_seconds, order_index, weight_unit)
+        (workout_id, session_id, exercise_name, set_number, target_reps, rest_seconds, order_index, weight_unit,
+         exercise_type, target_seconds)
       SELECT
         ${workoutId},
         s.id,
         pe.name,
         gs.n,
-        pe.reps,
+        CASE WHEN pe.exercise_type = 'static' THEN NULL ELSE pe.reps END,
         COALESCE(pe.rest_seconds, 90),
-        (dense_rank() OVER (ORDER BY pe.id))::int - 1,
-        ${unit}
+        (dense_rank() OVER (ORDER BY COALESCE(pe.position, 2147483647), pe.id))::int - 1,
+        ${unit},
+        COALESCE(pe.exercise_type, 'weighted'),
+        CASE WHEN pe.exercise_type = 'static' THEN COALESCE(pe.target_seconds, 20) ELSE NULL END
       FROM workout_sessions s
       JOIN plans p ON p.id = s.plan_id AND p.user_id = ${userId}
       JOIN plan_exercises pe ON pe.plan_id = p.id
@@ -117,21 +121,27 @@ export async function getSessionLogs(params: {
       wl.actual_weight::float AS actual_weight,
       wl.weight_unit,
       wl.actual_reps::int AS actual_reps,
+      wl.exercise_type,
+      wl.target_seconds,
+      wl.duration_seconds,
       COALESCE(wl.completed, false) AS completed,
       prev.actual_weight::float AS last_weight,
       prev.weight_unit AS last_unit,
-      prev.actual_reps::int AS last_reps
+      prev.actual_reps::int AS last_reps,
+      prev.duration_seconds AS last_seconds
     FROM workout_logs wl
     JOIN workout_sessions s ON s.id = wl.session_id AND s.user_id = ${userId}
     LEFT JOIN LATERAL (
-      SELECT pl.actual_weight, pl.weight_unit, pl.actual_reps
+      SELECT pl.actual_weight, pl.weight_unit, pl.actual_reps, pl.duration_seconds
       FROM workout_logs pl
       JOIN workout_sessions ps ON ps.id = pl.session_id
       WHERE ps.user_id = ${userId}
         AND ps.id <> ${sessionId}
         AND lower(trim(pl.exercise_name)) = lower(trim(wl.exercise_name))
         AND pl.set_number = wl.set_number
-        AND (pl.actual_weight IS NOT NULL OR pl.actual_reps IS NOT NULL)
+        -- Only the same type: a weighted "Prev" means nothing for a hold.
+        AND pl.exercise_type = wl.exercise_type
+        AND (pl.actual_weight IS NOT NULL OR pl.actual_reps IS NOT NULL OR pl.duration_seconds IS NOT NULL)
       ORDER BY COALESCE(ps.completed_at, ps.started_at) DESC, pl.id DESC
       LIMIT 1
     ) prev ON true
@@ -148,9 +158,13 @@ export async function getSessionLogs(params: {
     rest_seconds: Number(l.rest_seconds),
     actual_weight: convertWeight(l.actual_weight, l.weight_unit, unit),
     actual_reps: l.actual_reps == null ? null : Number(l.actual_reps),
+    exercise_type: normalizeExerciseType(l.exercise_type),
+    target_seconds: l.target_seconds == null ? null : Number(l.target_seconds),
+    duration_seconds: l.duration_seconds == null ? null : Number(l.duration_seconds),
     completed: Boolean(l.completed),
     last_weight: convertWeight(l.last_weight, l.last_unit, unit),
     last_reps: l.last_reps == null ? null : Number(l.last_reps),
+    last_seconds: l.last_seconds == null ? null : Number(l.last_seconds),
   }));
 }
 
