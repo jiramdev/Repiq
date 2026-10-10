@@ -10,8 +10,14 @@ and Neon Postgres. Deployed on Vercel.
 ## Features
 
 - **Week schedule**: assign a plan to each weekday; days link to plans by id.
-- **Plans**: exercises with sets, reps and rest; a shared exercise library with
-  private copy-on-write edits.
+- **Plans**: a one-handed add-exercise picker (search as you type over the
+  library and your own exercises, recent and most-used first, one tap adds with
+  sensible defaults, create a new exercise inline from the search text), −/+
+  steppers for sets, reps or hold time and rest, reorder and remove with undo.
+  A shared exercise library with private copy-on-write edits.
+- **Exercise types**: `weighted` (weight + reps), `bodyweight` (reps only, e.g.
+  pull-ups, HSPU) and `static` (a timed hold, e.g. planche, front lever, with a
+  start/stop hold timer in the workout). kg/lbs only applies to weighted.
 - **Workout mode**: one exercise at a time, last session's numbers as
   placeholders, sets saved as you type (debounced, retried, kept on the device
   while offline), screen kept awake.
@@ -58,6 +64,7 @@ SQL editor or with `psql "$DATABASE_URL" -f db/migrations/0001_auth_sessions.sql
 | `0006_hash_plaintext_passwords.sql` | bcrypt-hashes any leftover plain-text passwords (pgcrypto). **Run before deploying the code that removed plain-text login.** |
 | `0007_rate_limits.sql` | `rate_limits` table, expired-session cleanup, open-session index |
 | `0008_profile_body_weight.sql` | `user_profiles.body_weight` / `body_weight_unit`, backfilled from the weight log |
+| `0009_exercise_types.sql` | exercise types (`weighted`/`bodyweight`/`static`), hold-time columns, `plan_exercises.position`. Existing rows become `weighted`; shared library exercises get a type from their name. **Run before deploying.** |
 
 Every migration is idempotent. Where existing data could block a constraint, the
 migration skips it and prints a `NOTICE` with a query to find the offending rows.
